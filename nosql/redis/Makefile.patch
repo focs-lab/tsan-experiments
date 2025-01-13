@@ -1,0 +1,20 @@
+--- src/Makefile.orig	2024-01-09 19:51:41.000000000 +0800
++++ src/Makefile	2024-12-16 13:03:15.621787587 +0800
+@@ -31,7 +31,7 @@
+   STD+=-Wno-c11-extensions
+ endif
+ endif
+-WARN=-Wall -W -Wno-missing-field-initializers
++WARN=-Wall -W -Wno-missing-field-initializers -Wno-strict-prototypes
+ OPT=$(OPTIMIZATION)
+ 
+ # Detect if the compiler supports C11 _Atomic.
+@@ -103,7 +103,7 @@
+ 	LDFLAGS+=-fsanitize=undefined
+ else
+ ifeq ($(SANITIZER),thread)
+-	CFLAGS+=-fsanitize=thread -fno-sanitize-recover=all -fno-omit-frame-pointer
++	CFLAGS+=-fsanitize=thread -fno-sanitize-recover=all -fno-omit-frame-pointer -mllvm -tsan-use-escape-analysis-global
+ 	LDFLAGS+=-fsanitize=thread
+ else
+     $(error "unknown sanitizer=${SANITIZER}")
