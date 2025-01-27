@@ -1,0 +1,21 @@
+#CFLAGS="-Wno-missing-template-arg-list-after-template-kw -Wno-enum-constexpr-conversion"
+#CFLAGS="-Wno-enum-constexpr-conversion -Wno-vla-cxx-extension"
+FLAGS="-Wno-error -Wno-missing-template-arg-list-after-template-kw -Wno-enum-constexpr-conversion"
+export PARALLEL_LINK_JOBS=4
+export CFLAGS="$FLAGS"
+export CXXFLAGS="$FLAGS"
+
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+         -DCMAKE_C_COMPILER=clang \
+         -DCMAKE_CXX_COMPILER=clang++ \
+         -DCMAKE_C_FLAGS="$FLAGS" \
+         -DCMAKE_CXX_FLAGS="$FLAGS" \
+         -DCMAKE_APPEND_C_FLAGS="$FLAGS" \
+         -DCMAKE_APPEND_CXX_FLAGS="$FLAGS" \
+         -DCMAKE_C_FLAGS_DEBUG="$FLAGS" \
+         -DCMAKE_CXX_FLAGS_DEBUG="$FLAGS" \
+         -DWARNING_AS_ERROR=OFF \
+         -DENABLE_WERROR=OFF \
+         -DWERROR=OFF \
+         -DBENCHMARK_ENABLE_WERROR=OFF \
+         -DSANITIZE=thread
