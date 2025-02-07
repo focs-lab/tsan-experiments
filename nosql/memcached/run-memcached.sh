@@ -16,7 +16,7 @@ datetime_suffix=$(date +%Y-%m-%d_%H-%M)
 
 # Memcached and benchmark settings
 #NTHREADS=`nproc`
-MEMCACHED_PATH=memcached-1.6.29-$tsan_suffix
+MEMCACHED_PATH=memcached-$tsan_suffix
 NTHREADS=8
 
 # Vtune options
