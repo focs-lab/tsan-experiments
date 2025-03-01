@@ -1,11 +1,27 @@
 #!/bin/bash
 
-MEMCACHED_THREADS=2
-MEMTIER_THREADS=8
+# These functions will be moved to the common script library someday.
+error_exit() {
+	echo "Process exited with error code $?."
+	exit $?
+}
 
-BENCH_DURATION=30
-BENCH_RUN_DELAY=3
-PORT=12345
+interrupt_exit() {
+	echo "Interrupted."
+	exit $?
+}
+
+trap interrupt_exit SIGINT
+trap error_exit ERR
+
+
+[ -z "$MEMCACHED_THREADS" ] && MEMCACHED_THREADS=2
+[ -z "$MEMTIER_THREADS"   ] && MEMTIER_THREADS=8
+
+[ -z "$BENCH_DURATION"    ] && BENCH_DURATION=30
+[ -z "$BENCH_RUN_DELAY"   ] && BENCH_RUN_DELAY=3
+[ -z "$MEMCACHED_PORT"    ] && MEMCACHED_PORT=12345
+
 
 echo "memcached"
 
@@ -16,26 +32,32 @@ echo "   Unpacking"
 tar --extract --file "$BENCH_SOURCE_DIR"/memtier_benchmark*.tar.gz --directory "$BENCH_BUILD_DIR"
 mv $(ls -d "$BENCH_BUILD_DIR"/memtier_benchmark-*.*/) "$BENCH_BUILD_DIR"/memtier-source
 
+
 echo "   Autoreconf"
 cd "$BENCH_BUILD_DIR"/memtier-source
 autoreconf --install --force "$BENCH_BUILD_DIR"/memtier-source > autoreconf.stdout.txt 2> autoreconf.stderr.txt
 
+
 echo "   Configuring"
-mkdir "$BENCH_BUILD_DIR"/memtier-build
-cd "$BENCH_BUILD_DIR"/memtier-build
-CFLAGS="-O2" "$BENCH_BUILD_DIR"/memtier-source/configure > configure.stdout.txt 2> configure.stderr.txt
+mkdir "$BENCH_BUILD_DIR/memtier-build"
+cd "$BENCH_BUILD_DIR/memtier-build"
+CFLAGS="-O2" "$BENCH_BUILD_DIR/memtier-source/configure" > configure.stdout.txt 2> configure.stderr.txt
+
 
 echo "   Compiling"
 make --jobs $(nproc) > build.stdout.txt 2> build.stderr.txt
 
 mkdir "$BENCH_BUILD_DIR/bin"
-cp "$BENCH_BUILD_DIR"/memtier-build/memtier_benchmark "$BENCH_BUILD_DIR/bin"
+cp "$BENCH_BUILD_DIR/memtier-build/memtier_benchmark" "$BENCH_BUILD_DIR/bin"
+
 
 echo
-echo " > Unpacking"
+echo " > memcached"
+echo "   Unpacking"
 
 tar --extract --file "$BENCH_SOURCE_DIR"/memcached*.tar.gz --directory "$BENCH_BUILD_DIR"
-mv $(ls -d "$BENCH_BUILD_DIR"/memcached-*.*/) "$BENCH_BUILD_DIR"/source
+mv $(ls -d "$BENCH_BUILD_DIR/memcached-*.*/") "$BENCH_BUILD_DIR/source"
+
 
 echo
 echo " > Configuring"
@@ -53,6 +75,7 @@ do
          "$BENCH_BUILD_DIR/source"/configure > configure.stdout.txt 2> configure.stderr.txt; }
 done
 
+
 echo
 echo " > Compiling"
 
@@ -67,6 +90,7 @@ do
     cp "$BENCH_BUILD_DIR/build/$PASS/memcached" "$BENCH_BUILD_DIR/bin/$PASS"
 done
 
+
 echo
 echo " > Running"
 
@@ -78,7 +102,7 @@ do
     printf "   %-10s" "$PASS"
     taskset -c "$RUN_CORES" \
         "$BENCH_BUILD_DIR/bin/$PASS" \
-        --port "$PORT" \
+        --port "$MEMCACHED_PORT" \
         --conn-limit 4096 \
         --threads "$MEMCACHED_THREADS" > "$PASS.stdout.txt" 2> "$PASS.stderr.txt" &
 
@@ -90,13 +114,20 @@ do
         --protocol memcache_text \
         --hide-histogram \
         --random-data \
-        --port "$PORT" \
+        --port "$MEMCACHED_PORT" \
         --threads "$MEMTIER_THREADS" \
         --test-time "$BENCH_DURATION" > "bench-$PASS.stdout.txt" 2> "bench-$PASS.stderr.txt"
 
+    # NB: processes in background will also be killed if the main script
+    #is interrupted by `Ctrl + C` (or something similar).
     kill "$PID"
+
 
     grep "Totals" "bench-$PASS.stdout.txt" | awk '{print $2}' | tr '.' ' ' | awk '{print $1}'
 
     sleep "$BENCH_RUN_DELAY"
 done
+
+
+trap - SIGINT
+trap - ERR
