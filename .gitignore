@@ -1,4 +1,7 @@
-bench/*/*
-!bench/*/make.sh
+/bench/*/*
+!/bench/*/make.sh
+!/bench/*/*.tar.gz
+!/bench/*/*.zip
+!/bench/*/*.7z
 
-build/*
+/build/*
