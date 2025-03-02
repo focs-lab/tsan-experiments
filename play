@@ -1,6 +1,5 @@
 #!/bin/bash
 
-set -e
 export TIMEFORMAT=%E
 
 [ -z "$FLAGS_TSAN"      ] && FLAGS_TSAN="-fsanitize=thread"
@@ -72,12 +71,40 @@ echo
 echo "============================="
 echo
 
-rm -rf "$BUILD_DIR"
-mkdir "$BUILD_DIR"
 
-export BENCH_SOURCE_DIR=$(realpath "$SOURCE_DIR/memcached")
-export BENCH_BUILD_DIR=$(realpath "$BUILD_DIR"/memcached)
+call_benchmark() {
+	# Environment variables necessary for "bench/*/make.sh" scripts:
+	export BENCH_SOURCE_DIR=$(realpath "$SOURCE_DIR/$1")
+	export BENCH_BUILD_DIR=$(realpath "$BUILD_DIR/$1")
 
-mkdir "$BENCH_BUILD_DIR"
+	# Recreate the specified benchmark directory:
+	rm -rf "$BENCH_BUILD_DIR"
+	mkdir "$BENCH_BUILD_DIR"
 
-"$BENCH_SOURCE_DIR"/make.sh
+	# Call the benchmark itself:
+	"$BENCH_SOURCE_DIR/make.sh"
+}
+
+
+# Make script extremely sensible to errors:
+set -e
+
+# Create the "build/" directory:
+mkdir --parents "$BUILD_DIR"
+
+
+if [ -z "$1" ]; then
+	echo "All benchmarks:" && ls $SOURCE_DIR | xargs && echo
+
+	# Call all the benchmarks if no arguments provided:
+	for i in $(ls $SOURCE_DIR); do
+		call_benchmark $i
+	done
+
+else
+	# Call only specified benchmarks:
+	while [ -n "$1" ]; do
+		call_benchmark $1
+		shift
+	done
+fi

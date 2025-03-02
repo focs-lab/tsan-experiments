@@ -1,17 +1,10 @@
 #!/bin/bash
 
-# These functions will be moved to the common script library someday.
 error_exit() {
 	echo "Process exited with error code $?."
 	exit $?
 }
 
-interrupt_exit() {
-	echo "Interrupted."
-	exit $?
-}
-
-trap interrupt_exit SIGINT
 trap error_exit ERR
 
 
@@ -56,7 +49,7 @@ echo " > memcached"
 echo "   Unpacking"
 
 tar --extract --file "$BENCH_SOURCE_DIR"/memcached*.tar.gz --directory "$BENCH_BUILD_DIR"
-mv $(ls -d "$BENCH_BUILD_DIR/memcached-*.*/") "$BENCH_BUILD_DIR/source"
+mv $(ls -d "$BENCH_BUILD_DIR"/memcached-*.*/) "$BENCH_BUILD_DIR/memcached-source"
 
 
 echo
@@ -72,7 +65,7 @@ do
     printf "   %-10s" "$PASS"
     { time CFLAGS="$CURRENT_CFLAGS" \
         taskset -c "$BUILD_CORES" \
-         "$BENCH_BUILD_DIR/source"/configure > configure.stdout.txt 2> configure.stderr.txt; }
+         "$BENCH_BUILD_DIR/memcached-source/configure" > configure.stdout.txt 2> configure.stderr.txt; }
 done
 
 
@@ -125,9 +118,8 @@ do
 
     grep "Totals" "bench-$PASS.stdout.txt" | awk '{print $2}' | tr '.' ' ' | awk '{print $1}'
 
-    sleep "$BENCH_RUN_DELAY"
+    wait $PID 2>/dev/null
 done
 
 
-trap - SIGINT
 trap - ERR
