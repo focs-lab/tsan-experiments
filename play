@@ -19,10 +19,11 @@ export TIMEFORMAT=%E
 [ -z "$BENCH_CORES"     ] && BENCH_CORES="$RUN_CORES"
 [ -z "$BUILD_CORES"     ] && BUILD_CORES="$RUN_CORES"
 
+
 # [ -z "$VTUNE_ENABLE"    ] && VTUNE_ENABLE=0
 # [ -z "$VTUNE_HW_PROF"   ] && VTUNE_HW_PROF=1
 
-PATH="$LLVM_ROOT_PATH/bin:$PATH"
+export PATH="$LLVM_ROOT_PATH/bin:$PATH"
 # PATH="$VTUNE_ROOT_PATH/bin64:$PATH"
 
 for COMMAND in "$CC" "$CXX"
@@ -32,7 +33,7 @@ do
         echo "$COMMAND is not found"
         [ -z "$LLVM_ROOT_PATH" ] && echo "You can set path via LLVM_ROOT_PATH" || echo "Is LLVM_ROOT_PATH correct?"
         echo "It should point at LLVM build root, example: /path/to/llvm-project/build"
-        exit
+        exit 1
     fi
 done
 
@@ -51,9 +52,9 @@ do
         echo "int main() {}" | "$CC" -E -x c - $CFLAGS $FLAGS_TSAN_NEW -o /dev/null > /dev/null 2>&1
         if [ "$?" -ne 0 ]
         then
-            echo "tsan-new specified, but $CC cannot compile with FLAGS_TSAN_NEW ($FLAGS_TSAN_NEW)"
+            echo "tsan-new specified, but \$CC (\"$CC\") cannot compile with \$FLAGS_TSAN_NEW (\"$FLAGS_TSAN_NEW\")"
             echo "$CC" -E -x c - "$CFLAGS" "$FLAGS_TSAN_NEW"
-            exit
+            exit 2
         fi
     fi
 done
@@ -78,8 +79,24 @@ call_benchmark() {
 	export BENCH_BUILD_DIR=$(realpath "$BUILD_DIR/$1")
 
 	# Recreate the specified benchmark directory:
-	rm -rf "$BENCH_BUILD_DIR"
-	mkdir "$BENCH_BUILD_DIR"
+	if [ -z "$BENCH_SCRIPT_DEBUG" ]; then
+		rm -rf "$BENCH_BUILD_DIR"
+		mkdir "$BENCH_BUILD_DIR"
+
+	else
+		echo "call_benchmark(): debug mode."
+		if [ "$1" = "memcached" ]; then
+			rm -rf "$BENCH_BUILD_DIR"
+			mkdir "$BENCH_BUILD_DIR"
+
+		elif [ "$1" = "redis" ]; then
+			rm -rf "$BENCH_BUILD_DIR"/src
+			mkdir -p "$BENCH_BUILD_DIR"
+
+		else
+			echo "call_benchmark(): unknown benchmark name \"$1\""
+		fi
+	fi
 
 	# Call the benchmark itself:
 	"$BENCH_SOURCE_DIR/make.sh"

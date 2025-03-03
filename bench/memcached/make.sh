@@ -19,7 +19,7 @@ trap error_exit ERR
 echo "memcached"
 
 echo
-echo " > memtier"
+echo " memtier"
 echo "   Unpacking"
 
 tar --extract --file "$BENCH_SOURCE_DIR"/memtier_benchmark*.tar.gz --directory "$BENCH_BUILD_DIR"
@@ -45,7 +45,7 @@ cp "$BENCH_BUILD_DIR/memtier-build/memtier_benchmark" "$BENCH_BUILD_DIR/bin"
 
 
 echo
-echo " > memcached"
+echo " memcached"
 echo "   Unpacking"
 
 tar --extract --file "$BENCH_SOURCE_DIR"/memcached*.tar.gz --directory "$BENCH_BUILD_DIR"
