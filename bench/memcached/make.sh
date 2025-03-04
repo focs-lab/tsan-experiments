@@ -1,12 +1,7 @@
 #!/bin/bash
 
-error_exit() {
-	echo "Process exited with error code $?."
-	exit $?
-}
-
-trap error_exit ERR
-
+source "$(dirname $BENCH_SOURCE_DIR)/bench_script_lib.sh"
+error_handling_set
 
 [ -z "$MEMCACHED_THREADS" ] && MEMCACHED_THREADS=2
 [ -z "$MEMTIER_THREADS"   ] && MEMTIER_THREADS=8
@@ -90,6 +85,7 @@ echo " > Running"
 mkdir "$BENCH_BUILD_DIR/results"
 cd "$BENCH_BUILD_DIR/results"
 
+
 for PASS in $PASSES
 do
     printf "   %-10s" "$PASS"
@@ -120,6 +116,3 @@ do
 
     wait $PID 2>/dev/null
 done
-
-
-trap - ERR

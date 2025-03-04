@@ -1,11 +1,8 @@
 #!/bin/bash
 
-error_exit() {
-	echo "Process exited with error code $?."
-	exit $?
-}
+source "$(dirname $BENCH_SOURCE_DIR)/bench_script_lib.sh"
 
-trap error_exit ERR
+error_handling_set
 
 
 [ -z "$BENCH_DURATION"       ] && BENCH_DURATION=30
@@ -16,7 +13,6 @@ trap error_exit ERR
 
 # https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/#pitfalls-and-misconceptions: "Redis is, mostly, a single-threaded server <...>"
 #[ -z "$REDIS_SERVER_THREADS" ] && REDIS_SERVER_THREADS=4
-
 
 
 echo "Redis"
@@ -138,6 +134,3 @@ do
 
     wait $PID 2>/dev/null
 done
-
-
-trap - ERR

@@ -23,6 +23,7 @@ export TIMEFORMAT=%E
 # [ -z "$VTUNE_ENABLE"    ] && VTUNE_ENABLE=0
 # [ -z "$VTUNE_HW_PROF"   ] && VTUNE_HW_PROF=1
 
+
 export PATH="$LLVM_ROOT_PATH/bin:$PATH"
 # PATH="$VTUNE_ROOT_PATH/bin64:$PATH"
 
@@ -73,6 +74,12 @@ echo "============================="
 echo
 
 
+get_benchmarks_list() {
+	for BPATH in $(ls -d "$SOURCE_DIR"/*/); do
+		echo -n "$(basename $BPATH) "
+	done
+}
+
 call_benchmark() {
 	# Environment variables necessary for "bench/*/make.sh" scripts:
 	export BENCH_SOURCE_DIR=$(realpath "$SOURCE_DIR/$1")
@@ -84,6 +91,7 @@ call_benchmark() {
 		mkdir "$BENCH_BUILD_DIR"
 
 	else
+		# Debug preparation mode for specific benchmarks.
 		echo "call_benchmark(): debug mode."
 		if [ "$1" = "memcached" ]; then
 			rm -rf "$BENCH_BUILD_DIR"
@@ -99,7 +107,11 @@ call_benchmark() {
 	fi
 
 	# Call the benchmark itself:
-	"$BENCH_SOURCE_DIR/make.sh"
+	if [ -f "$BENCH_SOURCE_DIR/make.sh" ]; then
+		"$BENCH_SOURCE_DIR/make.sh"
+	else
+		echo -e "call_benchmark(): no benchmark \"$1\".\nAvailable names: [`get_benchmarks_list | tr ' ' '/' | sed "s=/=, =g" | sed 's/, $//1'`]."
+	fi
 }
 
 
@@ -111,10 +123,11 @@ mkdir --parents "$BUILD_DIR"
 
 
 if [ -z "$1" ]; then
-	echo "All benchmarks:" && ls $SOURCE_DIR | xargs && echo
+	echo -e "Benchmarks to play: $(get_benchmarks_list)\n"
 
 	# Call all the benchmarks if no arguments provided:
-	for i in $(ls $SOURCE_DIR); do
+	for i in $(get_benchmarks_list); do
+		#echo $i
 		call_benchmark $i
 	done
 
