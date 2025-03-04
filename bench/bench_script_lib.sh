@@ -26,9 +26,13 @@ exit_handling() {
 
 error_handling_release() {
 	trap - ERR
+	#set +e
 }
 
 error_handling_set() {
 	trap error_handling ERR
 	trap exit_handling EXIT
+
+	# Make script extremely sensible to errors:
+	#set -e
 }

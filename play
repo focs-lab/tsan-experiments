@@ -85,38 +85,38 @@ call_benchmark() {
 	export BENCH_SOURCE_DIR=$(realpath "$SOURCE_DIR/$1")
 	export BENCH_BUILD_DIR=$(realpath "$BUILD_DIR/$1")
 
-	# Recreate the specified benchmark directory:
-	if [ -z "$BENCH_SCRIPT_DEBUG" ]; then
-		rm -rf "$BENCH_BUILD_DIR"
-		mkdir "$BENCH_BUILD_DIR"
-
-	else
-		# Debug preparation mode for specific benchmarks.
-		echo "call_benchmark(): debug mode."
-		if [ "$1" = "memcached" ]; then
+	if [ -f "$BENCH_SOURCE_DIR/make.sh" ]; then
+		if [ -z "$BENCH_SCRIPT_DEBUG" ]; then
+			# Recreate the specified benchmark directory:
 			rm -rf "$BENCH_BUILD_DIR"
 			mkdir "$BENCH_BUILD_DIR"
 
-		elif [ "$1" = "redis" ]; then
-			rm -rf "$BENCH_BUILD_DIR"/src
-			mkdir -p "$BENCH_BUILD_DIR"
-
 		else
-			echo "call_benchmark(): unknown benchmark name \"$1\""
-		fi
-	fi
+			# Debug preparation mode for specific benchmarks.
+			echo "call_benchmark(): debug mode."
+			if [ "$1" = "memcached" ]; then
+				echo \"$1\" skip
+				#rm -rf "$BENCH_BUILD_DIR"
+				#mkdir "$BENCH_BUILD_DIR"
 
-	# Call the benchmark itself:
-	if [ -f "$BENCH_SOURCE_DIR/make.sh" ]; then
+			elif [ "$1" = "redis" ]; then
+				rm -rf "$BENCH_BUILD_DIR"/src
+				mkdir -p "$BENCH_BUILD_DIR"
+
+			else
+				echo "call_benchmark(): unknown benchmark name \"$1\""
+			fi
+		fi
+
+		# Call the benchmark itself:
 		"$BENCH_SOURCE_DIR/make.sh"
+
 	else
 		echo -e "call_benchmark(): no benchmark \"$1\".\nAvailable names: [`get_benchmarks_list | tr ' ' '/' | sed "s=/=, =g" | sed 's/, $//1'`]."
 	fi
-}
+} # of call_benchmark() {}
 
 
-# Make script extremely sensible to errors:
-set -e
 
 # Create the "build/" directory:
 mkdir --parents "$BUILD_DIR"
@@ -127,7 +127,7 @@ if [ -z "$1" ]; then
 
 	# Call all the benchmarks if no arguments provided:
 	for i in $(get_benchmarks_list); do
-		#echo $i
+		echo "===== $i ====="
 		call_benchmark $i
 	done
 

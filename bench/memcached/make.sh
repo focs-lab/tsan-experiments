@@ -1,7 +1,9 @@
 #!/bin/bash
 
 source "$(dirname $BENCH_SOURCE_DIR)/bench_script_lib.sh"
+
 error_handling_set
+
 
 [ -z "$MEMCACHED_THREADS" ] && MEMCACHED_THREADS=2
 [ -z "$MEMTIER_THREADS"   ] && MEMTIER_THREADS=8
@@ -49,7 +51,6 @@ mv $(ls -d "$BENCH_BUILD_DIR"/memcached-*.*/) "$BENCH_BUILD_DIR/memcached-source
 
 echo
 echo " > Configuring"
-
 for PASS in $PASSES
 do
     mkdir --parents "$BENCH_BUILD_DIR/build/$PASS"
