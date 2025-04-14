@@ -69,6 +69,9 @@ do
     printf "%-16s = %s\n" "$VAR" "${!VAR}"
 done
 
+printf "%-16s = %s\n" "\$CC --version" "$($CC --version | head -n1)"
+
+
 echo
 echo "============================="
 echo

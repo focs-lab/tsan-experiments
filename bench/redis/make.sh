@@ -38,6 +38,7 @@ mv $(ls -d "$BENCH_BUILD_DIR"/redis-*.*/) "$BENCH_BUILD_DIR"/src
 
 echo -e "\n   Compiling"
 
+
 for PASS in $PASSES
 do
     printf "   %-10s" "$PASS"
