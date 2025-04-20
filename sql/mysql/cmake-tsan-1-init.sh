@@ -24,6 +24,7 @@ cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
       -DCMAKE_PREFIX_PATH=$(pwd)/downloads/usr \
       #-DOPTIMIZE_SANITIZER_BUILDS=ON
 
+[ "$?" -eq 0 ] && \
 cmake -S "$SOURCE_DIR" -B "$BUILD_DIR" \
       -DCMAKE_INSTALL_PREFIX=dist-tsan \
       -DCMAKE_C_COMPILER="$CC" \
