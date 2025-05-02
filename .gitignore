@@ -10,3 +10,5 @@ nosql/redis/redis-tsan-new/
 nosql/memcached/memcached_pid
 nosql/memcached/vtune_result_dir
 projects/ffmpeg/FFmpeg-n4.3.9
+
+.idea
