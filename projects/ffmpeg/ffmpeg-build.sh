@@ -5,11 +5,19 @@
 CC="$LLVM_ROOT_PATH/bin/clang"
 CXX="$LLVM_ROOT_PATH/bin/clang++"
 
-TSAN_FLAGS="-g -fsanitize=thread -mllvm -tsan-use-escape-analysis-global -mllvm -debug-only=ea-escaping-callees"
 #TSAN_FLAGS="-g -fsanitize=thread"
+TSAN_FLAGS="-g -fsanitize=thread -mllvm -stats -mllvm -tsan-use-escape-analysis-global"
+#TSAN_FLAGS="-g -fsanitize=thread -mllvm -stats -mllvm -tsan-use-escape-analysis-global -mllvm -debug-only=ea-escaping-callees"
 
 PREFIX_DIR="/dev/shm/ffmpeg"
-BUILD_DIR="$PREFIX_DIR/build"
+
+CLANG_BUILD_VERSION="$(basename $LLVM_ROOT_PATH | sed "s/^llvm_//1")"
+
+if [ "$?" != "0" ] || [ -z "$CLANG_BUILD_VERSION" ] || [ "$CLANG_BUILD_VERSION" == "build" ]; then
+	BUILD_DIR="$PREFIX_DIR/build"
+else
+	BUILD_DIR="$PREFIX_DIR/build-$CLANG_BUILD_VERSION"
+fi
 
 [ -d "$PREFIX_DIR" ] && rm -r "$PREFIX_DIR"/*
 [ -d "$BUILD_DIR" ] && rm -r "$BUILD_DIR"
@@ -32,34 +40,19 @@ echo -e "Configuring... \n\$BUILD_DIR: $BUILD_DIR\n       \$CC: $CC\n      \$CXX
 	--extra-cflags="$TSAN_FLAGS" \
 	--extra-cxxflags="$TSAN_FLAGS" \
 	--extra-ldflags="$TSAN_FLAGS" \
+	--disable-doc \
 	--enable-gpl \
 	--enable-gnutls \
 	--enable-libx264 \
 	--enable-libx265 \
 	--enable-debug=3 \
-	--disable-optimizations \
 	--enable-shared \
+	--disable-optimizations \
 	--disable-stripping \
 	|| exit 1
 
 
 # Build and install:
-make -j 12 > make.stdout.log 2> make.stderr.log || exit 2
+make -j 12 2> make.stderr.log || exit 2
 
 make install || exit 3
-
-
-: '
-	--toolchain="clang-tsan" \
-	--enable-libaom \
-	--enable-libass \
-	--enable-libfdk-aac \
-	--enable-libfreetype \
-	--enable-libmp3lame \
-	--enable-libopus \
-	--enable-libsvtav1 \
-	--enable-libdav1d \
-	--enable-libvorbis \
-	--enable-libvpx \
-	--enable-nonfree
-'
