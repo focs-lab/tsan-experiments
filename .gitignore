@@ -5,3 +5,6 @@
 !/bench/*/*.7z
 
 /build/*
+nosql/redis/redis-tsan/
+nosql/redis/redis-tsan-new/
+nosql/memcached/memcached_pid
