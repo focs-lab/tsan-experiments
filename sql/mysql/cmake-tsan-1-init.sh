@@ -1,10 +1,11 @@
-source cmake-export-main-vars.sh "tsan"
+source cmake-export-main-vars.sh "tsan" || exit $?
 
 mkdir -p "$BUILD_DIR"
 
-[ -z "$FLAGS_TSAN" ] && FLAGS_TSAN=""
+[ -z "$FLAGS_TSAN" ] && FLAGS_TSAN="-mllvm -tsan-use-escape-analysis-global"
 
-[ -z "$FLAGS_MLLVM_STAT" ] && FLAGS_MLLVM_STAT="" # FLAGS_MLLVM_STAT="-mllvm -stats "
+#[ -z "$FLAGS_MLLVM_STAT" ] && FLAGS_MLLVM_STAT=""
+[ -z "$FLAGS_MLLVM_STAT" ] && FLAGS_MLLVM_STAT="-mllvm -stats "
 
 
 # Original CMake line: https://hackmd.io/@tsaninternals/Hy9L3J8KA/%2FXx9CdNCUSC6YokIXumJcwA#MySQL

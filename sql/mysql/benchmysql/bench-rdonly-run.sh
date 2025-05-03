@@ -1,4 +1,5 @@
-SYSBENCH_SCRIPT_FILENAME="oltp_read_write.lua"
+
+[ -z "$SYSBENCH_SCRIPT_FILENAME" ] && SYSBENCH_SCRIPT_FILENAME="oltp_read_write.lua"
 
 source callmysql-export-main-vars.sh
 

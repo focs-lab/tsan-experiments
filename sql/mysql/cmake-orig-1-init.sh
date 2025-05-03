@@ -1,4 +1,4 @@
-source cmake-export-main-vars.sh "orig"
+source cmake-export-main-vars.sh "orig" || exit $?
 
 mkdir -p "$BUILD_DIR"
 
