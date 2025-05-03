@@ -34,6 +34,7 @@ echo "Running configure..."
 COMMON_FLAGS="-DHAVE_CONFIG_H -I. -DNDEBUG -O2 -g"
 if [ "$BUILD_TYPE" = "tsan" ]; then
     COMMON_FLAGS="$COMMON_FLAGS -fsanitize=thread"
+    LINK_FLAGS="$LLVM_BUILD_DIR/lib/clang/19/lib/x86_64-unknown-linux-gnu/libclang_rt.tsan.a"
 fi
 
 compile_module() {
@@ -63,8 +64,9 @@ llvm-link -S -o memcached.ll *.ll || {
 }
 
 echo "Building final executable..."
+
 clang -o memcached memcached.ll $COMMON_FLAGS \
-    -levent "$LLVM_BUILD_DIR/lib/clang/19/lib/x86_64-unknown-linux-gnu/libclang_rt.tsan.a" -lm || {
+    -levent -lm $LINK_FLAGS || {
   echo "Final build failed"
   exit 1
 }
