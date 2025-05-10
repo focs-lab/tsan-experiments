@@ -121,9 +121,6 @@ COMPILER_FLAGS="$COMPILER_FLAGS -g"
 COMPILER_FLAGS_TO_IR="-S -emit-llvm"
 COMPILER_FLAGS_TSAN="-fsanitize=thread"
 
-COMPILER_FLAGS_TSAN_EA="-mllvm -tsan-use-escape-analysis-global "
-COMPILER_FLAGS_TSAN_ST="-mllvm -tsan-use-escape-analysis-global -mllvm -tsan-use-single-threaded -mllvm -debug-only=tsan"
-
 
 get_filename_bin() {
 	[ -z "$OUTFILEPREFIX" ] && echo "$(caller). No prefix for file." && exit 1
@@ -172,7 +169,7 @@ if [[ "$BUILD_TYPE" == *"capture-tracker"* || "$BUILD_TYPE" == "all" ]]; then
 fi
 
 if [[ "$BUILD_TYPE" == *"escape-analysis"* || "$BUILD_TYPE" == "all" ]]; then
-	BUILDFLAGS="$COMPILER_FLAGS $COMPILER_FLAGS_TSAN -mllvm -tsan-use-escape-analysis"
+	BUILDFLAGS="$COMPILER_FLAGS $COMPILER_FLAGS_TSAN -mllvm -tsan-use-escape-analysis-global"
 	[ -n "$BUILD_TYPE_MLLVM_DEBUG_PASSES" ] && BUILDFLAGS="$BUILDFLAGS -mllvm -debug-only=escape-analysis"
 
 	build_common "ea"
@@ -201,6 +198,9 @@ if [[ "$BUILD_TYPE" == *"single-threaded"* || "$BUILD_TYPE" == "all" ]]; then
 	OUTFILESUFFIX="-st-link"
 	SRCLL_LINKED="$(get_filename_ir)"
 	SRCLL_LINKED_TMP="${SRCLL_LINKED}-tmp"
+
+	COMPILER_FLAGS_TSAN_ST="-mllvm -tsan-use-escape-analysis-global -mllvm -tsan-use-single-threaded -mllvm -debug-only=tsan"
+
 
 	# To default LL:
 	$COMPILER_BIN $BUILDFLAGS $SRCFILE $COMPILER_FLAGS_TSAN_ST $COMPILER_FLAGS_TO_IR -o "$SRCLL_LINKED_TMP"

@@ -2,8 +2,8 @@
 
 rm -v st_summary.txt *.out *.ll
 
-rm -rf ea-logs/
+rm -vrf ea-logs/
 
-rm *-_check.sh
+rm -v *-_check.sh
 
 echo "Cleanup complete."
