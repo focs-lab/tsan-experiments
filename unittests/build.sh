@@ -117,7 +117,7 @@ printinfo "\e[37mCompiler: $COMPILER_BIN"
 printinfo "\e[37m    File: $SRCFILE"
 
 
-COMPILER_FLAGS="$COMPILER_FLAGS -g"
+COMPILER_FLAGS="-g -O2 -mllvm -align-all-functions=6 $COMPILER_FLAGS "
 COMPILER_FLAGS_TO_IR="-S -emit-llvm"
 COMPILER_FLAGS_TSAN="-fsanitize=thread"
 
@@ -140,7 +140,11 @@ build_common() {
 	[ -n "$1" ] && OUTFILESUFFIX="-$1" || OUTFILESUFFIX=""
 
 	printinfo " Building: \e[37m$BUILDFLAGS"
+
+	echo $COMPILER_BIN $BUILDFLAGS $SRCFILE -o "$(get_filename_ir)" $COMPILER_FLAGS_TO_IR
 	$COMPILER_BIN $BUILDFLAGS $SRCFILE -o "$(get_filename_ir)" $COMPILER_FLAGS_TO_IR
+
+	echo $COMPILER_BIN $BUILDFLAGS $SRCFILE -o "$(get_filename_bin)"
 	$COMPILER_BIN $BUILDFLAGS $SRCFILE -o "$(get_filename_bin)"
 
 	printinfo "  Success: \e[32m$(get_filename_bin)\n"
