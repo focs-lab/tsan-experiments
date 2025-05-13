@@ -33,8 +33,10 @@ void *ownershipThread( void *unused ) {
 #ifdef MANUAL_TSAN_EXCLUDE
 		__tsan_disable();
 #endif
-		for ( int j = 0; j < 20; j++ )
-			b = ( ( b + acur ) * 12345 ) % 0xFFFFFFFF;
+		for ( int j = 0; j < 50; j++ )
+			//b = ( ( b + acur ) * 12345 ) % 0xFFFFFFFF;
+			b += 12345;
+
 #ifdef MANUAL_TSAN_EXCLUDE
 		__tsan_enable();
 #endif

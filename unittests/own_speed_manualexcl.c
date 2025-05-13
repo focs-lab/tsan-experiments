@@ -6,9 +6,8 @@
 
 #define MANUAL_TSAN_EXCLUDE 1
 
-#ifdef MANUAL_TSAN_EXCLUDE
-#	include <sanitizers/tsan_interface.h>
-#endif
+void __tsan_enable();
+void __tsan_disable();
 
 pthread_mutex_t l1, l2;
 int a = 0;
