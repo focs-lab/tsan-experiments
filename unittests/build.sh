@@ -11,10 +11,10 @@
 	echo "Default BUILD_TYPE: \"all\"."
 	echo
 	echo "Available default build types (comma-separated): "
-	echo "    capture-tracker escape-analysis ownership swmr single-threaded"
+	echo "    capture-tracker escape-analysis ownership swmr st-flag st-link"
 	echo
 	echo "Available special build types: "
-	echo "    all          Alias to capture-tracker,escape-analysis,ownership,swmr,single-threaded."
+	echo "    all          Alias to capture-tracker,escape-analysis,ownership,swmr,st-flag,st-link."
 	echo "    orig         Build original binary/IR without TSan."
 	echo "    mllvm-debug  Enables \"-passes=<type> -mllvm -debug-only=<type>\" for selected types."
 	echo "    rawflags     Overrides all other types. \"Free build mode\", passing raw \$CFLAGS or \$CXXFLAGS."
@@ -194,7 +194,15 @@ if [[ "$BUILD_TYPE" == *"swmr"* || "$BUILD_TYPE" == "all" ]]; then
 fi
 
 
-if [[ "$BUILD_TYPE" == *"single-threaded"* || "$BUILD_TYPE" == "all" ]]; then
+if [[ "$BUILD_TYPE" == *"st-flag"* || "$BUILD_TYPE" == "all" ]]; then
+	BUILDFLAGS="$COMPILER_FLAGS $COMPILER_FLAGS_TSAN -mllvm -tsan-use-single-threaded"
+	[ -n "$BUILD_TYPE_MLLVM_DEBUG_PASSES" ] && BUILDFLAGS="$BUILDFLAGS -mllvm -debug-only=single-threaded"
+
+	build_common "st-flag"
+fi
+
+
+if [[ "$BUILD_TYPE" == *"st-link"* || "$BUILD_TYPE" == "all" ]]; then
 	printinfo " Building: \e[37mSingle-threaded"
 
 	[ -f "st_summary.txt" ] && rm st_summary.txt
