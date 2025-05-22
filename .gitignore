@@ -12,3 +12,11 @@ nosql/memcached/vtune_result_dir
 projects/ffmpeg/FFmpeg-n4.3.9
 
 .idea
+
+*_summary.txt
+*.ll
+
+*.out
+
+mysql-server*
+mysql-*.tar.gz
