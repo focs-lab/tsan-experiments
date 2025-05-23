@@ -1,5 +1,5 @@
 PREFIX=`pwd`-install
-FLAGS="-g" # -O2
+FLAGS="-g -O2"
 export CFLAGS="$FLAGS"
 export CXXFLAGS="$FLAGS"
 export CPPFLAGS="$FLAGS"

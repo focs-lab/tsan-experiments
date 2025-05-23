@@ -7,6 +7,7 @@
 /build/*
 nosql/redis/redis-tsan/
 nosql/redis/redis-tsan-new/
+nosql/memcached/memcached_type
 nosql/memcached/memcached_pid
 nosql/memcached/vtune_result_dir
 projects/ffmpeg/FFmpeg-n4.3.9
