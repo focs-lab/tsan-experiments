@@ -1,0 +1,14 @@
+optarg
+memory_file
+crawler_expired_mod
+mmap_base
+crawler_mod_regs
+lru_crawler_initialized
+crawler_metadump_mod
+lru_maintainer_crawler_check.next_crawls
+crc32c_once_big
+lru_maintainer_crawler_check.next_crawl_wait
+slabmem_limit
+uriencode_str
+crawler_mgdump_mod
+mmap_fd
