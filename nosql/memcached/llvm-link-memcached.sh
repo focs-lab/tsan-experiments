@@ -34,7 +34,11 @@ echo "Running configure..."
 COMMON_FLAGS="-DHAVE_CONFIG_H -I. -DNDEBUG -O2 -g"
 if [ "$BUILD_TYPE" = "tsan" ]; then
     COMMON_FLAGS="$COMMON_FLAGS -fsanitize=thread"
-    LINK_FLAGS="$LLVM_BUILD_DIR/lib/clang/19/lib/x86_64-unknown-linux-gnu/libclang_rt.tsan.a"
+    if [ "$(uname)" = "Darwin" ]; then
+        LINK_FLAGS="$LLVM_BUILD_DIR/lib/clang/19/lib/darwin/libclang_rt.tsan_osx_dynamic.dylib"
+    else
+        LINK_FLAGS="$LLVM_BUILD_DIR/lib/clang/19/lib/x86_64-unknown-linux-gnu/libclang_rt.tsan.a"
+    fi
 fi
 
 compile_module() {
@@ -62,13 +66,14 @@ llvm-link -S -o memcached.ll *.ll || {
     echo "Linking failed"
     exit 1
 }
+echo "Linked into memcached.ll"
 
-echo "Building final executable..."
-
-clang -o memcached memcached.ll $COMMON_FLAGS \
-    -levent -lm $LINK_FLAGS || {
-  echo "Final build failed"
-  exit 1
-}
-
-echo "Build completed successfully"
+#echo "Building final executable..."
+#
+#clang -o memcached memcached.ll $COMMON_FLAGS \
+#    -levent -lm $LINK_FLAGS || {
+#  echo "Final build failed"
+#  exit 1
+#}
+#
+#echo "Build completed successfully"
