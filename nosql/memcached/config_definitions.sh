@@ -10,7 +10,7 @@ declare -A CONFIG_DETAILS
 CONFIG_DETAILS["orig"]="FLAGS_COMMON_BASE" # Special marker for regular flags
 CONFIG_DETAILS["tsan"]="FLAGS_TSAN_BASE"  # Special marker for basic TSan flags
 CONFIG_DETAILS["tsan-lo"]="-mllvm -tsan-use-lock-ownership"
-CONFIG_DETAILS["tsan-lo-ub"]="-mllvm -tsan-use-lock-ownership-upperbound"
+CONFIG_DETAILS["tsan-loub"]="-mllvm -tsan-use-lock-ownership-upperbound"
 CONFIG_DETAILS["tsan-st"]="-mllvm -tsan-use-single-threaded"
 CONFIG_DETAILS["tsan-swmr"]="-mllvm -tsan-use-swmr"
 CONFIG_DETAILS["tsan-ea"]="-mllvm -tsan-use-escape-analysis-global"
