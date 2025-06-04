@@ -5,12 +5,17 @@
 !/bench/*/*.7z
 
 /build/*
-nosql/redis/redis-tsan/
-nosql/redis/redis-tsan-new/
-nosql/memcached/memcached_type
-nosql/memcached/memcached_pid
-nosql/memcached/vtune_result_dir
-projects/ffmpeg/FFmpeg-n4.3.9
+/nosql/redis/redis-tsan/
+/nosql/redis/redis-tsan-new/
+/nosql/memcached/memcached_type
+/nosql/memcached/memcached_pid
+/nosql/memcached/vtune_result_dir
+/projects/ffmpeg/FFmpeg-n4.3.9
+/projects/ffmpeg/ffmpeg-orig
+/projects/ffmpeg/ffmpeg-tsan*
+/projects/ffmpeg/results
+/projects/ffmpeg/*.csv
+
 
 .idea
 
@@ -18,6 +23,9 @@ projects/ffmpeg/FFmpeg-n4.3.9
 *.ll
 
 *.out
+*.rez
 
 mysql-server*
 mysql-*.tar.gz
+/sql/mysql/benchmysql/data
+/sql/mysql/downloads
