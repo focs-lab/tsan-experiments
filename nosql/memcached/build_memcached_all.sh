@@ -1,9 +1,12 @@
 #!/bin/bash
 
+set -e
+
 # Source the file with configuration definitions
 # Make sure the path to config_definitions.sh is correct
 # if it is not in the same directory as this script.
-source ./config_definitions.sh
+source ./config_definitions.sh || exit $?
+
 
 # Check if CONFIG_DETAILS was loaded
 if [ ${#CONFIG_DETAILS[@]} -eq 0 ]; then
@@ -22,8 +25,7 @@ for config_name in "${!CONFIG_DETAILS[@]}"; do
     # or provide the full/relative path to it.
     if ! bash ./build_memcached.sh "$config_name"; then
         echo "Error building configuration: $config_name"
-        # You can decide whether to abort the entire process on error
-        # exit 1
+        exit 1
     fi
     echo "----------------------------------------"
 done

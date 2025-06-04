@@ -169,6 +169,9 @@ fi
 
 cd "$BUILD_DIR_NAME"
 
+
+# -mllvm -debug-only=single-threaded,lock-ownership
+
 echo "Creating $CONFIG_SH_NAME..."
 # Using FLAGS variable as per your edit
 cat <<EOF > "$CONFIG_SH_NAME"
@@ -195,7 +198,7 @@ if ! "./$CONFIG_SH_NAME"; then
 fi
 
 echo "--- Building Memcached ($CONFIG_TYPE) ---"
-NUM_JOBS=${NPROC:-$(sysctl -n hw.ncpu)}
+NUM_JOBS=${NPROC:-$(nproc)}
 echo "Using $NUM_JOBS jobs for make."
 if ! make -j$NUM_JOBS; then
     echo "Error: 'make' failed for $CONFIG_TYPE."
