@@ -146,6 +146,7 @@ echo "--- Preparing build for: $CONFIG_TYPE ---"
 echo "Target build directory: $BUILD_DIR_NAME"
 echo "Compiler: $TARGET_CC"
 echo "Final CFLAGS: $FINAL_CFLAGS"
+echo
 
 # Clean up
 if [ -d "$BUILD_DIR_NAME" ]; then
@@ -209,7 +210,7 @@ fi
 
 echo "--- Building FFmpeg ($CONFIG_TYPE) ---"
 
-NUM_JOBS=${NPROC:-$(nproc)}
+NUM_JOBS=${NPROC:-$(($(nproc) * 7 / 8))}
 echo "Using $NUM_JOBS jobs for make."
 
 make -j${NUM_JOBS} 2> make.stderr.log || BUILD_ERRORCODE="$?"
