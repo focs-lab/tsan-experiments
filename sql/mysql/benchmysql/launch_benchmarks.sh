@@ -1,10 +1,8 @@
 #!/bin/bash
 
 MYSQLBUILDLIST="
-	mysql-build_main_with-orig-tsan-c609043dd00955bf177ff57b0bad2a87c1e61a36
-	mysql-build_tsan-ea-ownership-9250cdbcc8
-	mysql-build_tsan-ea-pathes-to-underl-objs_ac06afd3203
-	mysql-build_tsan-with-ea-IPA-8a2198773e
+	mysql-build_tsan-with-ea-IPA_780ba8a6e4__no-excludes
+	mysql-build_tsan-with-ea-IPA_780ba8a6e4__top10-tsan-optimizes
 "
 
 #Override:
@@ -40,15 +38,17 @@ for BUILD in $MYSQLBUILDLIST; do
 
 	logmessage "Ready to initialize the benchmark database."
 
-	while ! ./bench-rdonly-init.sh ; do
+	while ! ./server-check-connection.sh ; do
 		logmessage "Waiting for server reply..."
 		sleep 1
 	done
 
+	./bench-rdonly-init.sh
+
 	logmessage "\e[92mBenchmark database initialized. Launching..."
 
 	./bench-rdonly-run.sh | tee "benchmark-$BUILD.txt"
-	#hyperfine --min-runs 5 --export-csv="myqsl-$i.csv" "./bench-rd"
+	#hyperfine --min-runs 5 --export-csv="myqsl-$i.csv" "./bench-run"
 
 	logmessage " ===== Finished: $BUILD ===== "
 

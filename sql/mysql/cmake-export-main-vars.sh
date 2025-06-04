@@ -5,6 +5,9 @@
 
 # Special LLVM clang path:
 if [ -n "$LLVM_ROOT_PATH" ]; then
+	# A temporal crutch.
+	[ ! -d "$LLVM_ROOT_PATH/.git" ] && export LLVM_ROOT_PATH="/home/all/src/llvm-project-mcm"
+
 	if [ -n "$COMPILERS_PATH" ]; then
 		export CC="$COMPILERS_PATH/bin/clang"
 		export CXX="$COMPILERS_PATH/bin/clang++"
@@ -48,7 +51,12 @@ fi
 
 
 # Automatic constants:
-export BUILD_DIR="$BUILD_DIR_ROOT/build-$1"
-export INSTALL_PREFIX="$BUILD_DIR_ROOT/install-$1"
+if [ -z "$BUILD_EXTRA_SUFFIX" ]; then
+	export BUILD_DIR="$BUILD_DIR_ROOT/build-$1"
+	export INSTALL_PREFIX="$BUILD_DIR_ROOT/install-$1"
+else
+	export BUILD_DIR="$BUILD_DIR_ROOT/build-${1}_$BUILD_EXTRA_SUFFIX"
+	export INSTALL_PREFIX="$BUILD_DIR_ROOT/install-${1}_$BUILD_EXTRA_SUFFIX"
+fi
 
 export BUILD_NPROC="$(( $(nproc) / 4 * 3 ))"
