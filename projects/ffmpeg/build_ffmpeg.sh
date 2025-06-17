@@ -41,7 +41,7 @@ fi
 
 # Validate archive
 if [ ! -f "$FFMPEG_ARCHIVE" ]; then
-    echo "Error: Memcached archive '$FFMPEG_ARCHIVE' not found."
+    echo "Error: FFmpeg archive '$FFMPEG_ARCHIVE' not found."
     exit 1
 fi
 
@@ -241,8 +241,8 @@ if [ ! -f "$RESULT_DIR_NAME/bin/ffmpeg" ]; then
 fi
 
 
-[ -d "$BUILD_DIR_NAME" ] && rm -rf "$BUILD_DIR_NAME"
+[ -d "$BUILD_DIR_NAME" ] && mv "$BUILD_DIR_NAME" "$RESULT_DIR_NAME/builddir"
 
 
 echo "--- Build for $CONFIG_TYPE completed successfully ---"
-echo "FFmpeg executable is at: $RESULT_DIR_NAME/ffmpeg"
+echo "FFmpeg executable is at: $RESULT_DIR_NAME/bin/ffmpeg"

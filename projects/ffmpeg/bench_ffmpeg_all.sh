@@ -3,135 +3,161 @@
 set -e
 
 # --- Configuration ---
-
-# Video file:
 FFTESTVIDEO="/home/mcm-remote/Downloads/WatchingEyeTexture.mkv"
-[ ! -f "$FFTESTVIDEO" ] && echo "No video $FFTESTVIDEO" && exit 1
+[ ! -f "$FFTESTVIDEO" ] && echo "No video file found at $FFTESTVIDEO" && exit 1
 
-# What to build:
-FFBUILDLIST=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs | sed "s/\s/,/g")
-[ -z "$FFBUILDLIST" ] && echo "No FFmpeg builds (\"ffmpeg-*\")." && exit 2
+FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
+[ -z "$FFBUILDLIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-*\")." && exit 2
 
-# Hyperfine minimal runs number (results deviating automatically increases the value):
-HYPERFINE_MIN_RUNS=3
+# Number of runs to average the results
+RUNS_COUNT=3
 
-# Splitting and reconstructing with commas:
-FFBUILDLIST=$(echo "$FFBUILDLIST" | tr -s ',')
-
-if ! command -v jq > /dev/null 2>&1; then
-	echo "No 'jq' program found for results processing."
-	exit 3
+# --- Check for required tools ---
+if ! command -v /usr/bin/time > /dev/null 2>&1; then
+    echo "The '/usr/bin/time' program was not found. Please install it."
+    exit 3
+fi
+if ! command -v bc > /dev/null 2>&1; then
+    echo "The 'bc' program was not found. It is required for floating-point math."
+    exit 3
+fi
+if command -v jq > /dev/null 2>&1; then
+    JQ_AVAILABLE=true
+    JSON_RESULTS_FILE=$(mktemp)
+    SUMMARY_JSON="summary_ffmpeg_benchmark.json"
+    echo "jq found, will generate JSON output to $SUMMARY_JSON."
+else
+    JQ_AVAILABLE=false
+    echo "jq not found, will generate CSV output only."
 fi
 
-
-
-#HYPERFINE_EXTRA_PARAMS="--show-output"
-
-# Определения кодеков и их параметров для FFmpeg.
-# Формат: "название_кодека": "параметры_FFmpeg::расширение_выходного_файла"
-# Примечания по кодекам:
-# - libx264/libx265: современные, высокоэффективные, хорошо параллелизуются. -preset medium обеспечивает баланс.
-# - mjpeg: покадровый JPEG, средняя параллелизация.
-# - msvideo1: очень старый, без внутренней параллелизации.
-# - prores_ks: качественный кодек для редактирования, хорошая параллелизация.
-# - libvpx-vp9: кодек Google, хорошо параллелизуется.
-# - copy_passthrough: для базовой оценки накладных расходов FFmpeg без перекодирования.
+# --- Codec Definitions ---
 declare -A CODECS
 CODECS[h264_libx264]="-c:v libx264 -preset medium -crf 23 ::mp4"
 CODECS[h265_libx265]="-c:v libx265 -preset medium -crf 28 -tag:v hvc1 ::mp4"
 CODECS[mjpeg]="-c:v mjpeg -pix_fmt yuvj420p -q:v 2 ::avi"
 CODECS[copy_passthrough]="-c:v copy -c:a copy ::mkv"
 
-# Too slow or broken:
-#CODECS[prores_ks]="-c:v prores_ks -profile:v 3 ::mov"
-#CODECS[msvideo1]="-c:v msvideo1 -vf \"scale=trunc(iw/4)*4:trunc(ih/4)*4\" ::avi"
-#CODECS[vp9_libvpx]="-c:v libvpx-vp9 -b:v 1M ::webm" # Bitrate-based for VP9
-
-
-# --- FFmpeg benchmark start ---
-
-echo "--- FFmpeg benchmark start ---"
-echo "Builds: $FFBUILDLIST"
+# --- FFmpeg Benchmark Start ---
+echo "--- FFmpeg Benchmark Start (using /usr/bin/time) ---"
+echo "Builds to test: $FFBUILDLIST_STR"
 echo "Video file: $FFTESTVIDEO"
+echo "Runs per test: $RUNS_COUNT"
 echo ""
 
-mkdir -p results
-
 SUMMARY_CSV="summary_ffmpeg_benchmark.csv"
-echo "Codec,FFBUILD,mean,stddev,median,user,system,min,max,command" > "$SUMMARY_CSV"
+echo "Codec,FFBUILD,runs_completed,mean_time_s,stddev_time_s,min_time_s,max_time_s,mean_user_s,mean_system_s,max_mem_kb,command_template" > "$SUMMARY_CSV"
 
+read -ra FFBUILD_ARRAY <<< "$FFBUILDLIST_STR"
+TIME_OUTPUT_FILE=$(mktemp)
+trap 'rm -f "$TIME_OUTPUT_FILE" ${JSON_RESULTS_FILE:-}' EXIT
 
 for codec_key in "${!CODECS[@]}"; do
-    echo "--- Benchmark: $codec_key ---"
     codec_info="${CODECS[$codec_key]}"
-
-    # Выделение параметров FFmpeg и выходного расширения:
     encoding_params="${codec_info%%::*}"
     output_ext="${codec_info##*::}"
-    #IFS='::' read -r encoding_params output_ext <<< "$codec_info"
-    #echo $encoding_params
-    #echo $output_ext
-    #continue
+    
+    for build in "${FFBUILD_ARRAY[@]}"; do
+        echo "--- Benchmarking: Codec [$codec_key], Build [$build] ---"
 
-    # An exec command:
-    FFEXEC_CMD="bin/ffmpeg -hide_banner -i \"$FFTESTVIDEO\" -threads $(nproc) -y $encoding_params -loglevel info /dev/shm/out.$output_ext"
+        # ======================================================================
+        # CRITICAL FIX: Explicitly reset arrays for each new benchmark set.
+        # This prevents data from one test from leaking into the next.
+        elapsed_times=()
+        user_times=()
+        system_times=()
+        mem_usages=()
+        # ======================================================================
 
-    HYPERFINE_JSON="results/${codec_key}.json"
-    HYPERFINE_CSV="results/${codec_key}.csv"
+        CMD_TEMPLATE="LD_LIBRARY_PATH=\"$build/lib/\" $build/bin/ffmpeg -hide_banner -i \"$FFTESTVIDEO\" -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
+        
+        for (( i=1; i<=RUNS_COUNT; i++ )); do
+            echo -n "  Run $i/$RUNS_COUNT... "
+            
+            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" >/dev/null 2>&1 || {
+                echo "FAILED! This run will be skipped."
+                continue
+            }
+            
+            elapsed_raw=`grep "Elapsed (wall clock) time" "$TIME_OUTPUT_FILE" | awk '{print $NF}'`
+            if [[ $elapsed_raw == *":"* ]]; then
+                elapsed_s=`echo "$elapsed_raw" | awk -F: '{ secs=0; for(i=1;i<=NF;i++) secs = secs*60 + $i; print secs }'`
+            else
+                elapsed_s=$elapsed_raw
+            fi
+            user_s=$(grep "User time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+            system_s=$(grep "System time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+            max_mem=$(grep "Maximum resident set size" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+            
+            echo "OK (Time: ${elapsed_s}s, Mem: ${max_mem}KB)"
+            
+            elapsed_times+=("$elapsed_s")
+            user_times+=("$user_s")
+            system_times+=("$system_s")
+            mem_usages+=("$max_mem")
+        done
 
-    echo "hyperfine for $codec_key:"
-    echo -e "\tLD_LIBRARY_PATH=\"{FFBUILD}/lib/\" {FFBUILD}/$FFEXEC_CMD"
+        successful_runs=${#elapsed_times[@]}
+        if [ "$successful_runs" -eq 0 ]; then
+            echo "  No successful runs for this configuration. Skipping."
+            echo "--------------------------------------------------------"
+            echo ""
+            continue
+        fi
 
-    # Launching hyperfine:
-    hyperfine \
-        --parameter-list FFBUILD "$FFBUILDLIST" \
-        --min-runs "$HYPERFINE_MIN_RUNS" \
-        --export-json="$HYPERFINE_JSON" \
-        --export-csv="$HYPERFINE_CSV" \
-        $HYPERFINE_EXTRA_PARAMS \
-        "LD_LIBRARY_PATH=\"{FFBUILD}/lib/\" {FFBUILD}/$FFEXEC_CMD" || {
-	        echo "Error when processing $codec_key."
-	        echo "-------------------------------------"
-	        echo ""
-	        exit 4
-	        continue
-    }
+        # --- Calculate Statistics ---
+        sum_time=$(printf "%s\n" "${elapsed_times[@]}" | paste -sd+ - | bc)
+        mean_time=$(echo "scale=4; $sum_time / $successful_runs" | bc)
+        min_time=$(printf "%s\n" "${elapsed_times[@]}" | sort -n | head -1)
+        max_time=$(printf "%s\n" "${elapsed_times[@]}" | sort -n | tail -1)
+        
+        sum_sq_diff=0
+        for t in "${elapsed_times[@]}"; do
+            diff=$(echo "$t - $mean_time" | bc)
+            sum_sq_diff=$(echo "$sum_sq_diff + ($diff * $diff)" | bc)
+        done
+        # Handle the case of a single run to avoid division by zero in sqrt
+        if [ "$successful_runs" -gt 1 ]; then
+            stddev_time=$(echo "scale=4; sqrt($sum_sq_diff / ($successful_runs))" | bc)
+        else
+            stddev_time=0
+        fi
 
+        sum_user=$(printf "%s\n" "${user_times[@]}" | paste -sd+ - | bc)
+        mean_user=$(echo "scale=4; $sum_user / $successful_runs" | bc)
+        
+        sum_system=$(printf "%s\n" "${system_times[@]}" | paste -sd+ - | bc)
+        mean_system=$(echo "scale=4; $sum_system / $successful_runs" | bc)
+        
+        max_mem_peak=$(printf "%s\n" "${mem_usages[@]}" | sort -n | tail -1)
 
-    echo "--- Results for $codec_key: ---"
-    if [ -f "$HYPERFINE_JSON" ]; then
-        jq -r --arg codec_name "$codec_key" '
-          .results[] |
-          "\(.parameters.FFBUILD): \(.mean | tostring)s (mean), \(.stddev | tostring)s (stddev), min=\(.min | tostring)s, max=\(.max | tostring)s"
-        ' "$HYPERFINE_JSON" | column -t
+        # (Остальная часть скрипта: вывод и запись в файлы — без изменений)
+        echo "  Results: Time(avg±std): ${mean_time}s ± ${stddev_time}s | Mem(peak): ${max_mem_peak}KB | Runs: ${successful_runs}/${RUNS_COUNT}"
+        
+        csv_line=$(printf '"%s","%s","%s",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,"%s"\n' \
+            "$codec_key" "$build" "${successful_runs}/${RUNS_COUNT}" "$mean_time" "$stddev_time" \
+            "$min_time" "$max_time" "$mean_user" "$mean_system" "$max_mem_peak" "$CMD_TEMPLATE")
+        echo "$csv_line" >> "$SUMMARY_CSV"
+
+        if [ "$JQ_AVAILABLE" = true ]; then
+            jq -n \
+                --arg codec "$codec_key" --arg build "$build" --argjson runs_successful "$successful_runs" \
+                --argjson runs_total "$RUNS_COUNT" --argjson mean_time "$mean_time" --argjson stddev_time "$stddev_time" \
+                --argjson min_time "$min_time" --argjson max_time "$max_time" --argjson mean_user "$mean_user" \
+                --argjson mean_system "$mean_system" --argjson max_mem_kb "$max_mem_peak" --arg command_template "$CMD_TEMPLATE" \
+                '{ "codec": $codec, "build": $build, "runs": { "successful": $runs_successful, "total": $runs_total }, "time": { "mean_s": $mean_time, "stddev_s": $stddev_time, "min_s": $min_time, "max_s": $max_time }, "cpu": { "mean_user_s": $mean_user, "mean_system_s": $mean_system }, "memory": { "max_peak_kb": $max_mem_kb }, "command_template": $command_template }' >> "$JSON_RESULTS_FILE"
+        fi
+
+        echo "--------------------------------------------------------"
         echo ""
-
-        # Append to the general CSV file.
-        jq -r --arg codec_name "$codec_key" '
-          .results[] |
-          [
-            $codec_name,
-            .parameters.FFBUILD,
-            .mean,
-            .stddev,
-            .median,
-            .user,
-            .system,
-            .min,
-            .max,
-            .command
-          ] | @csv
-        ' "$HYPERFINE_JSON" >> "$SUMMARY_CSV"
-    else
-        echo "No JSON general results file \"$HYPERFINE_JSON\" found."
-    fi
-
-	rm "/dev/shm/out.$output_ext"
-    echo "-------------------------------------"
-    echo ""
+    done
+    rm -f "/dev/shm/out.$output_ext"
 done
 
+if [ "$JQ_AVAILABLE" = true ]; then
+    jq -s '{benchmarks: .}' "$JSON_RESULTS_FILE" > "$SUMMARY_JSON"
+    echo "JSON results have been finalized in $SUMMARY_JSON"
+fi
 
-set +e
+echo "Benchmark finished. CSV results are in $SUMMARY_CSV"
 
-echo -e "\n----- Ready! -----\n"
