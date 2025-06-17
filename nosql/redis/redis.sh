@@ -1,6 +1,6 @@
 #!/bin/bash
 
-LLVM_BUILD_DIR="/home/somebody/llvm-project/build-release"
+# LLVM_BUILD_DIR="/home/somebody/llvm-project/build-release"
 
 # BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
 BENCH_ARCHIVE_URL="https://github.com/redis/redis/archive/refs/tags/7.0.15.tar.gz"
@@ -130,6 +130,7 @@ do
         cp -r ../../summaries/escape-analysis-global/ea-logs .
         cp ../../summaries/lock-ownership/lo_summary.txt .
         cp ../../summaries/single-threaded/st_summary.txt .
+        cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
         
         TSAN_FLAGS=""
         [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
