@@ -17,11 +17,11 @@ elif [ ! -f "$MYSQL_DIR/mysqld" ]; then
 fi
 
 
-export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
+[ -z "$SYSBENCH_SCRIPTS_DIR" ] && export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 export SYSBENCH_CONNECTION_ARGS="--mysql-user=root --mysql-socket=/tmp/mysql.sock "
 export SYSBENCH_RUN_THREADS="$(( $(nproc) * 3 / 4 ))"
-export SYSBENCH_RUN_ARGS="--threads=$SYSBENCH_RUN_THREADS --time=60 --report-interval=10 --rand-type=special"
-#--rand-type=uniform
+export SYSBENCH_RUN_ARGS="--threads=$SYSBENCH_RUN_THREADS --time=180 --rand-type=special"
+#--rand-type=uniform --report-interval=10
 
 # Sysbench script file selection. "$SYSBENCH_SCRIPT_FILEPATH" is a resulting file:
 [ -z "$SYSBENCH_SCRIPT_FILE" ] && {

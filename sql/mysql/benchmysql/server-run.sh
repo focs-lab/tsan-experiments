@@ -4,7 +4,7 @@ source callmysql-export-main-vars.sh
 
 ./server-check-connection.sh && echo "Already launched." && exit 1
 
-taskset -c 0-11 $MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
+$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
 #$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
 #$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR"
 

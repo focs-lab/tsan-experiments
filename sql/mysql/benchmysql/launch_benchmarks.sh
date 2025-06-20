@@ -1,19 +1,20 @@
 #!/bin/bash
 
-MYSQLBUILDLIST="
-	mysql-build_tsan-with-ea-IPA_780ba8a6e4__no-excludes
-	mysql-build_tsan-with-ea-IPA_780ba8a6e4__top10-tsan-optimizes
-"
+export MYSQL_BUILDS_DIR=".."
 
-#Override:
-#MYSQLBUILDLIST="mysql-build_tsan-with-ea-enable-disable-tsan-instr_10d6ed8632"
+export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 
-MYSQLBUILDBASEDIR="/home/all/src/tsan-experiments/sql/mysql/build-ready"
-SYSBENCH_SCRIPT_FILENAME="oltp_read_write.lua"
+SYSBENCH_ALL_SCRIPTS="$(ls "$SYSBENCH_SCRIPTS_DIR"/oltp_*.lua "$SYSBENCH_SCRIPTS_DIR"/select_random_*.lua | xargs basename -a | grep -v oltp_common\.lua | xargs)"
+
+export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
 
 
 #MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed "s/[,\n\t]/ /g" | sed "s/\s\s\+/ /g")
-MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs)
+MYSQLBUILDLIST=$(ls -d "$MYSQL_BUILDS_DIR"/mysql-tsan "$MYSQL_BUILDS_DIR"/mysql-tsan-* "$MYSQL_BUILDS_DIR"/mysql-orig | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs basename -a | xargs)
+
+# Debug string with exit:
+#echo "$MYSQLBUILDLIST" && echo && echo $SYSBENCH_ALL_SCRIPTS && exit
+
 
 
 logmessage() {
@@ -22,35 +23,41 @@ logmessage() {
 
 set -e
 
-./server-init.sh || logmessage "Server initialized already."
+./server-datadir-init.sh || logmessage "Server datadir initialized already."
 
 
-for BUILD in $MYSQLBUILDLIST; do
-	export MYSQL_DIR="$MYSQLBUILDBASEDIR/$BUILD/install-tsan/bin"
-	#export MYSQL_DIR="/home/all/src/tsan-experiments/sql/mysql/build-ready/mysql-build_main-c609043dd0/install-orig/bin/"
+for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
+	logmessage "\n##########################= =##=- ==-=--- -\n#\n# \e[1;36m$BENCHSCRIPT\e[0;94m \n#\n#####===-=-- -   -"
 
-	[ ! -f "$MYSQL_DIR/mysqld" ] && logmessage "\e[93mNo MyQSL found at \"$MYSQL_DIR\", skipping." && continue
+	for BUILD in $MYSQLBUILDLIST; do
+		OUTPUT_FILE_NAME="benchmark_${BUILD/mysql-/}_$(echo ${BENCHSCRIPT//_/-} | sed "s/\.lua/.txt/1" | xargs basename)"
 
-	logmessage " ===== Started: $BUILD ===== "
+		export MYSQL_DIR="$MYSQL_BUILDS_DIR/$BUILD/bin"
+		export SYSBENCH_SCRIPT_FILENAME="$BENCHSCRIPT"
 
-	./server-run.sh &
-	sleep 5
+		[ ! -f "$MYSQL_DIR/mysqld" ] && logmessage "\e[93mNo MyQSL found at \"$MYSQL_DIR\", skipping." && continue
 
-	logmessage "Ready to initialize the benchmark database."
+		logmessage " ===== Started: $BUILD ===== "
 
-	while ! ./server-check-connection.sh ; do
-		logmessage "Waiting for server reply..."
-		sleep 1
+		./server-run.sh &
+		sleep 5
+
+		logmessage "Ready to initialize the benchmark database."
+
+		while ! ./server-check-connection.sh ; do
+			logmessage "Waiting for server reply..."
+			sleep 1
+		done
+
+		./bench-init.sh
+
+		logmessage "\e[92mBenchmark database initialized. Launching..."
+
+		./bench-run.sh | tee "$OUTPUT_FILE_NAME"
+
+		logmessage " ===== Finished for $BUILD / $BENCHSCRIPT (output file $OUTPUT_FILE_NAME) ===== "
+
+		./bench-cleanup.sh
+		./server-shutdown.sh
 	done
-
-	./bench-rdonly-init.sh
-
-	logmessage "\e[92mBenchmark database initialized. Launching..."
-
-	./bench-rdonly-run.sh | tee "benchmark-$BUILD.txt"
-	#hyperfine --min-runs 5 --export-csv="myqsl-$i.csv" "./bench-run"
-
-	logmessage " ===== Finished: $BUILD ===== "
-
-	./server-shutdown.sh
 done
