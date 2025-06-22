@@ -1,10 +1,13 @@
 source callmysql-export-main-vars.sh
 
-# Note: it's better to use the "taskset" command to prevent CPU races between MySQL and its benchmark.
-
 ./server-check-connection.sh && echo "Already launched." && exit 1
 
-$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
+
+#/usr/bin/time -v -o "time.log" bash -c "$MYSQL_DIR/mysqld --datadir=\"$MYSQL_DATA_DIR\"" &
+/usr/bin/time -v -o "time.log" $MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
+
+echo "$!" > "PID_usr_bin_time_mysqld"
+
 #$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR" &
 #$MYSQL_DIR/mysqld --datadir="$MYSQL_DATA_DIR"
 
