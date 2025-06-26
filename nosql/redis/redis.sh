@@ -9,6 +9,18 @@ BENCH_POLYGON_DIR="/dev/shm/redis-polygon"
 BENCH_ARCHIVE_NAME=`basename "$BENCH_ARCHIVE_URL"`
 SCRIPT_DIR=$(dirname $(realpath -s "$0"))
 
+# List of all build variants
+#BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
+#    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
+#    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
+#    dom-ea-lo-swmr st-swmr dom-st-swmr ea-st-swmr dom-ea-st-swmr \
+#    lo-st-swmr dom-lo-st-swmr ea-lo-st-swmr dom-ea-lo-st-swmr"
+BUILD_OPTIONS="dom-ea-lo-st-swmr"
+
+# List of benchmark tests
+#BENCHMARK_TESTS="PING_INLINE PING_MBULK SET GET INCR LPUSH RPUSH LPOP RPOP \
+#    SADD HSET SPOP ZADD ZPOPMIN LPUSH LRANGE_100 LRANGE_300 LRANGE_500 LRANGE_600 MSET"
+
 [ -z "$LLVM_BUILD_DIR" ] && { echo -e "No LLVM_BUILD_DIR set\n  Example: /home/user/llvm-project/build-release"; exit 1; }
 
 export PATH="$LLVM_BUILD_DIR/bin:$PATH"
@@ -108,11 +120,7 @@ fi
 
 mkdir results
 
-for OPTION in "orig" "tsan" "dom" "ea" "dom-ea" "lo" "dom-lo" "ea-lo" "dom-ea-lo" \
-    "st" "dom-st" "ea-st" "dom-ea-st" "lo-st" "dom-lo-st" "ea-lo-st" "dom-ea-lo-st" \
-    "swmr" "dom-swmr" "ea-swmr" "dom-ea-swmr" "lo-swmr" "dom-lo-swmr" "ea-lo-swmr" \
-    "dom-ea-lo-swmr" "st-swmr" "dom-st-swmr" "ea-st-swmr" "dom-ea-st-swmr" \
-    "lo-st-swmr" "dom-lo-st-swmr" "ea-lo-st-swmr" "dom-ea-lo-st-swmr"
+for OPTION in $BUILD_OPTIONS
 do
     echo -n "Building $OPTION... "
     echo -n "$OPTION " >> results/compile.txt
@@ -147,11 +155,7 @@ done
 
 cp -r "$SCRIPT_DIR/redis.conf" .
 
-for OPTION in "orig" "tsan" "dom" "ea" "dom-ea" "lo" "dom-lo" "ea-lo" "dom-ea-lo" \
-    "st" "dom-st" "ea-st" "dom-ea-st" "lo-st" "dom-lo-st" "ea-lo-st" "dom-ea-lo-st" \
-    "swmr" "dom-swmr" "ea-swmr" "dom-ea-swmr" "lo-swmr" "dom-lo-swmr" "ea-lo-swmr" \
-    "dom-ea-lo-swmr" "st-swmr" "dom-st-swmr" "ea-st-swmr" "dom-ea-st-swmr" \
-    "lo-st-swmr" "dom-lo-st-swmr" "ea-lo-st-swmr" "dom-ea-lo-st-swmr"
+for OPTION in $BUILD_OPTIONS
 do
 
     echo "Testing $OPTION"

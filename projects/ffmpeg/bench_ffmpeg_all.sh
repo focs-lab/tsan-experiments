@@ -3,7 +3,7 @@
 set -e
 
 # --- Configuration ---
-FFTESTVIDEO="/home/mcm-remote/Downloads/WatchingEyeTexture.mkv"
+FFTESTVIDEO="./input/WatchingEyeTexture.mkv"
 [ ! -f "$FFTESTVIDEO" ] && echo "No video file found at $FFTESTVIDEO" && exit 1
 
 FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
