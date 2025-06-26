@@ -89,18 +89,18 @@ cd redis-benchmark/src
 make -j $(nproc) redis-benchmark > /dev/null 2>&1
 cd ../..
 
-echo "Building a single LL"
-tar --extract --file "$BENCH_ARCHIVE_NAME"
-mv "$BENCH_ARCHIVE_DIR" redis-single-ll
-cd redis-single-ll/src
-build_single_ll
-cd ../..
-
 if [[ -d "$SCRIPT_DIR/summaries" ]]
 then
     echo "Ready summaries found"
     cp -r "$SCRIPT_DIR/summaries" .
 else
+    echo "Building a single LL"
+    tar --extract --file "$BENCH_ARCHIVE_NAME"
+    mv "$BENCH_ARCHIVE_DIR" redis-single-ll
+    cd redis-single-ll/src
+    build_single_ll
+    cd ../..
+
     echo "Building summaries (may take a long time)"
     mkdir summaries
     cd summaries
@@ -135,11 +135,18 @@ do
     then
         { time SANITIZER=thread USE_JEMALLOC=no make redis-server -j $(nproc) > /dev/null 2>&1; } |& tee -a ../../results/compile.txt
     else
-        cp -r ../../summaries/escape-analysis-global/ea-logs .
-        cp ../../summaries/lock-ownership/lo_summary.txt .
-        cp ../../summaries/single-threaded/st_summary.txt .
-        cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
-        
+        [ -d "../../summaries/escape-analysis-global/ea-logs" ] && \
+          cp -r ../../summaries/escape-analysis-global/ea-logs .
+
+        [ -f "../../summaries/lock-ownership/lo_summary.txt" ] && \
+          cp ../../summaries/lock-ownership/lo_summary.txt .
+
+        [ -f "../../summaries/single-threaded/st_summary.txt" ] && \
+          cp ../../summaries/single-threaded/st_summary.txt .
+
+        [ -f "../../summaries/escape-analysis-global/ea-logs/ea_summary.txt" ] && \
+          cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
+
         TSAN_FLAGS=""
         [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
         [[ "$OPTION" == *"swmr"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr"
