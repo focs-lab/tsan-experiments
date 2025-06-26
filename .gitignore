@@ -29,3 +29,5 @@ mysql-server*
 mysql-*.tar.gz
 /sql/mysql/benchmysql/data
 /sql/mysql/downloads
+
+*.log
