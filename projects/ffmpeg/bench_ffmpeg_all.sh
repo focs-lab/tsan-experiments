@@ -12,6 +12,18 @@ FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
 # Number of runs to average the results
 RUNS_COUNT=3
 
+# --- VTune Profiling Configuration (optional) ---
+USE_VTUNE=false
+VTUNE_SAMPLING_MODE="hw"
+VTUNE_ANALYSIS_TYPE="hotspots"
+
+# --- Argument Parsing ---
+if [[ "$1" == "--vtune" ]]; then
+    USE_VTUNE=true
+    echo "VTune profiling enabled."
+    shift # Consume the --vtune argument
+fi
+
 # --- Check for required tools ---
 if ! command -v /usr/bin/time > /dev/null 2>&1; then
     echo "The '/usr/bin/time' program was not found. Please install it."
@@ -69,12 +81,28 @@ for codec_key in "${!CODECS[@]}"; do
         mem_usages=()
         # ======================================================================
 
-        CMD_TEMPLATE="LD_LIBRARY_PATH=\"$build/lib/\" $build/bin/ffmpeg -hide_banner -i \"$FFTESTVIDEO\" -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
-        
+        export LD_LIBRARY_PATH="$build/lib/:$LD_LIBRARY_PATH"
+        CMD_TEMPLATE="$build/bin/ffmpeg -hide_banner -i \"$FFTESTVIDEO\" -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
+
+        if [ "$USE_VTUNE" = true ]; then
+            vtune_result_dir="vtune_results/${build}_${codec_key}"
+            mkdir -p "$vtune_result_dir"
+
+            vtune_options="--collect=$VTUNE_ANALYSIS_TYPE --result-dir=$vtune_result_dir \
+               -knob sampling-mode=$VTUNE_SAMPLING_MODE \
+               -knob enable-stack-collection=true \
+               -data-limit=5000"
+
+            CMD_TEMPLATE="vtune $vtune_options -- $CMD_TEMPLATE"
+            echo "CMD :$CMD_TEMPLATE"
+            echo "  VTune enabled. Results will be in: $vtune_result_dir"
+        fi
+
         for (( i=1; i<=RUNS_COUNT; i++ )); do
             echo -n "  Run $i/$RUNS_COUNT... "
             
-            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" >/dev/null 2>&1 || {
+#            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" >/dev/null 2>&1 || {
+            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" || {
                 echo "FAILED! This run will be skipped."
                 continue
             }

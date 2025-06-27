@@ -31,3 +31,4 @@ mysql-*.tar.gz
 /sql/mysql/downloads
 
 *.log
+*.json
