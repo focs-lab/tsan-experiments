@@ -2,6 +2,12 @@
 
 # This script 'benchmarks-launch.sh' calls all other benchmark scripts.
 
+export USE_VTUNE=false
+if [[ "$1" == "--vtune" ]]; then
+    export USE_VTUNE=true
+    echo -e "\n  \e[94mVTune profiling will be enabled for runs.\e[m  \n"
+    shift
+fi
 
 export MYSQL_BUILDS_DIR=".."
 
@@ -40,6 +46,13 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 		export MYSQL_DIR="$MYSQL_BUILDS_DIR/$BUILD/bin"
 		export SYSBENCH_SCRIPT_FILENAME="$BENCHSCRIPT"
 		#export SYSBENCH_RUN_SECONDS=60
+
+		if [ "$USE_VTUNE" = "true" ]; then
+			vtune_result_dir="vtune_results/${BUILD}_${BENCHSCRIPT%.lua}"
+			mkdir -p "$vtune_result_dir"
+			export V_TUNE_RESULT_DIR="$vtune_result_dir"
+			echo "VTune results will be saved to $vtune_result_dir"
+		fi
 
 		[ ! -f "$MYSQL_DIR/mysqld" ] && logmessage "\e[93mNo MyQSL found at \"$MYSQL_DIR\", skipping." && continue
 
