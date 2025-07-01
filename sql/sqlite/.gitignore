@@ -1,2 +1,5 @@
 sqlite-src-*
 build
+*.db
+*.db-wal
+*.db-shm

@@ -14,8 +14,8 @@ MEMCACHED_BINARY_PATH="$MEMCACHED_BUILD_DIR/memcached"
 
 datetime_suffix=$(date +%Y-%m-%d_%H-%M)
 
-#NTHREADS=`nproc`
-NTHREADS=10
+NTHREADS=`nproc`
+#NTHREADS=10
 
 # Check if the memcached binary exists and is executable
 if [ ! -d "$MEMCACHED_BUILD_DIR" ]; then
