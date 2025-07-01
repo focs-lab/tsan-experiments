@@ -46,11 +46,10 @@ for build_path in "${build_dirs[@]}"; do
 
     # Run the specific test script for the configuration.
     # "$@" passes any arguments from this script (e.g., 'vtune') to the run script.
-    echo "$RUN_SCRIPT" "$config_name" "$@"
-#    if ! "$RUN_SCRIPT" "$config_name" "$@"; then
-#        echo "An error occurred while running the test for '$config_name'. Aborting."
-#        exit 1
-#    fi
+    if ! "$RUN_SCRIPT" "$config_name" "$@"; then
+        echo "An error occurred while running the test for '$config_name'. Aborting."
+        exit 1
+    fi
 done
 
 echo "----------------------------------------"

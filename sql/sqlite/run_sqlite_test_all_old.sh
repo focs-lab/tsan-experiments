@@ -33,11 +33,11 @@ for d in build/test-*; do
             if [ "$USE_VTUNE" = true ]; then
                 echo "-----------------------------------------"
                 echo "Running configuration: $config_name (with VTune)"
-                echo ./run_sqlite_test.sh "$config_name" vtune
+                ./run_sqlite_test.sh "$config_name" vtune
             else
                 echo "-----------------------------------------"
                 echo "Running configuration: $config_name"
-                echo ./run_sqlite_test.sh "$config_name"
+                ./run_sqlite_test.sh "$config_name"
             fi
         else
             echo "Skipping '$config_name' — no executable '$exe_path' found."
