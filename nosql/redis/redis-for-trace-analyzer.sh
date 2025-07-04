@@ -15,7 +15,7 @@ SCRIPT_DIR=$(dirname $(realpath -s "$0"))
 #    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
 #    dom-ea-lo-swmr st-swmr dom-st-swmr ea-st-swmr dom-ea-st-swmr \
 #    lo-st-swmr dom-lo-st-swmr ea-lo-st-swmr dom-ea-lo-st-swmr"
-BUILD_OPTIONS="tsan dom-ea-lo-st-swmr"
+BUILD_OPTIONS="dom-ea-lo-st-swmr"
 
 # List of benchmark tests
 #BENCHMARK_TESTS="PING_INLINE PING_MBULK SET GET INCR LPUSH RPUSH LPOP RPOP \
@@ -76,7 +76,7 @@ function run {
     
     ls -alh /dev/shm/trace.txt
     
-    python3 /home/somebody/trace-analyze/trace-analyze.py /dev/shm/trace.txt > /dev/shm/"$OPTION-$TEST-analyzed".txt
+    trace-analyze-get-stats.py /dev/shm/trace.txt > /dev/shm/"$OPTION-$TEST-analyzed".txt
 }
 
 CC=clang
