@@ -18,17 +18,19 @@
 
 
 .idea
+build-ready
 
 *_summary.txt
 *.ll
 
 *.out
 *.rez
+*.log
+*.json
 
 mysql-server*
 mysql-*.tar.gz
 /sql/mysql/benchmysql/data
 /sql/mysql/downloads
-
-*.log
-*.json
+/sql/mysql/mysql-tsan*
+/sql/mysql/mysql-orig

@@ -215,11 +215,14 @@ cmake -S "$PROJECT_SRC_DIR" -B "$BUILD_DIR_NAME" \
       -DCMAKE_CXX_FLAGS="$FINAL_CFLAGS" \
       -DDOWNLOAD_BOOST=1 \
       -DWITH_BOOST=downloads \
+      -DWITH_LIBEVENT=bundled \
       -DWITH_UNIT_TESTS=OFF \
       -DINSTALL_MYSQLTESTDIR= \
       $CMAKE_TSAN_OPTION \
       -DCMAKE_PREFIX_PATH="$PROJECT_SRC_DIR/downloads/usr" \
 	|| BUILD_ERRORCODE="$?"
+
+#      --trace-expand -Wno-dev \
 
 if [ -n "$BUILD_ERRORCODE" ]; then
     echo "Error: Configuration failed for $CONFIG_TYPE (errorcode $BUILD_ERRORCODE)."
