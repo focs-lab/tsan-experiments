@@ -9,6 +9,18 @@ BENCH_POLYGON_DIR="/dev/shm/redis-polygon"
 BENCH_ARCHIVE_NAME=`basename "$BENCH_ARCHIVE_URL"`
 SCRIPT_DIR=$(dirname $(realpath -s "$0"))
 
+# List of all build variants
+#BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
+#    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
+#    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
+#    dom-ea-lo-swmr st-swmr dom-st-swmr ea-st-swmr dom-ea-st-swmr \
+#    lo-st-swmr dom-lo-st-swmr ea-lo-st-swmr dom-ea-lo-st-swmr"
+BUILD_OPTIONS="dom-ea-lo-st-swmr"
+
+# List of benchmark tests
+#BENCHMARK_TESTS="PING_INLINE PING_MBULK SET GET INCR LPUSH RPUSH LPOP RPOP \
+#    SADD HSET SPOP ZADD ZPOPMIN LPUSH LRANGE_100 LRANGE_300 LRANGE_500 LRANGE_600 MSET"
+
 [ -z "$LLVM_BUILD_DIR" ] && { echo -e "No LLVM_BUILD_DIR set\n  Example: /home/user/llvm-project/build-release"; exit 1; }
 
 export PATH="$LLVM_BUILD_DIR/bin:$PATH"
@@ -77,18 +89,18 @@ cd redis-benchmark/src
 make -j $(nproc) redis-benchmark > /dev/null 2>&1
 cd ../..
 
-echo "Building a single LL"
-tar --extract --file "$BENCH_ARCHIVE_NAME"
-mv "$BENCH_ARCHIVE_DIR" redis-single-ll
-cd redis-single-ll/src
-build_single_ll
-cd ../..
-
 if [[ -d "$SCRIPT_DIR/summaries" ]]
 then
     echo "Ready summaries found"
     cp -r "$SCRIPT_DIR/summaries" .
 else
+    echo "Building a single LL"
+    tar --extract --file "$BENCH_ARCHIVE_NAME"
+    mv "$BENCH_ARCHIVE_DIR" redis-single-ll
+    cd redis-single-ll/src
+    build_single_ll
+    cd ../..
+
     echo "Building summaries (may take a long time)"
     mkdir summaries
     cd summaries
@@ -108,11 +120,7 @@ fi
 
 mkdir results
 
-for OPTION in "orig" "tsan" "dom" "ea" "dom-ea" "lo" "dom-lo" "ea-lo" "dom-ea-lo" \
-    "st" "dom-st" "ea-st" "dom-ea-st" "lo-st" "dom-lo-st" "ea-lo-st" "dom-ea-lo-st" \
-    "swmr" "dom-swmr" "ea-swmr" "dom-ea-swmr" "lo-swmr" "dom-lo-swmr" "ea-lo-swmr" \
-    "dom-ea-lo-swmr" "st-swmr" "dom-st-swmr" "ea-st-swmr" "dom-ea-st-swmr" \
-    "lo-st-swmr" "dom-lo-st-swmr" "ea-lo-st-swmr" "dom-ea-lo-st-swmr"
+for OPTION in $BUILD_OPTIONS
 do
     echo -n "Building $OPTION... "
     echo -n "$OPTION " >> results/compile.txt
@@ -127,11 +135,18 @@ do
     then
         { time SANITIZER=thread USE_JEMALLOC=no make redis-server -j $(nproc) > /dev/null 2>&1; } |& tee -a ../../results/compile.txt
     else
-        cp -r ../../summaries/escape-analysis-global/ea-logs .
-        cp ../../summaries/lock-ownership/lo_summary.txt .
-        cp ../../summaries/single-threaded/st_summary.txt .
-        cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
-        
+        [ -d "../../summaries/escape-analysis-global/ea-logs" ] && \
+          cp -r ../../summaries/escape-analysis-global/ea-logs .
+
+        [ -f "../../summaries/lock-ownership/lo_summary.txt" ] && \
+          cp ../../summaries/lock-ownership/lo_summary.txt .
+
+        [ -f "../../summaries/single-threaded/st_summary.txt" ] && \
+          cp ../../summaries/single-threaded/st_summary.txt .
+
+        [ -f "../../summaries/escape-analysis-global/ea-logs/ea_summary.txt" ] && \
+          cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
+
         TSAN_FLAGS=""
         [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
         [[ "$OPTION" == *"swmr"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr"
@@ -147,11 +162,7 @@ done
 
 cp -r "$SCRIPT_DIR/redis.conf" .
 
-for OPTION in "orig" "tsan" "dom" "ea" "dom-ea" "lo" "dom-lo" "ea-lo" "dom-ea-lo" \
-    "st" "dom-st" "ea-st" "dom-ea-st" "lo-st" "dom-lo-st" "ea-lo-st" "dom-ea-lo-st" \
-    "swmr" "dom-swmr" "ea-swmr" "dom-ea-swmr" "lo-swmr" "dom-lo-swmr" "ea-lo-swmr" \
-    "dom-ea-lo-swmr" "st-swmr" "dom-st-swmr" "ea-st-swmr" "dom-ea-st-swmr" \
-    "lo-st-swmr" "dom-lo-st-swmr" "ea-lo-st-swmr" "dom-ea-lo-st-swmr"
+for OPTION in $BUILD_OPTIONS
 do
 
     echo "Testing $OPTION"

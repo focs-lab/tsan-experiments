@@ -18,13 +18,15 @@
 
 
 .idea
+build-ready
 
 *_summary.txt
 *.ll
 
 *.out
 *.rez
-build-ready
+*.log
+*.json
 
 mysql-server*
 mysql-*.tar.gz

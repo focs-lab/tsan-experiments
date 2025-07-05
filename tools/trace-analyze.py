@@ -33,7 +33,7 @@ def main() -> None:
             if line.startswith(" > "):
 
                 # Parse string
-                signature, operation, pointer, size, thread = line.split()
+                signature, operation, pointer, size, thread, source = line.split()
 
                 # Push operation to found operations
                 operations.add(operation)
