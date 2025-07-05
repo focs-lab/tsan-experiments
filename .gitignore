@@ -24,8 +24,11 @@
 
 *.out
 *.rez
+build-ready
 
 mysql-server*
 mysql-*.tar.gz
 /sql/mysql/benchmysql/data
 /sql/mysql/downloads
+/sql/mysql/mysql-tsan*
+/sql/mysql/mysql-orig
