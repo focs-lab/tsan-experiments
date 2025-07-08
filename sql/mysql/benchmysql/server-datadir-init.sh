@@ -5,3 +5,4 @@ source callmysql-export-main-vars.sh
 ./server-check-connection.sh && echo "Cannot init MySQL server, already launched." && exit 1
 
 $MYSQL_DIR/mysqld --initialize-insecure --datadir="$MYSQL_DATA_DIR"
+#2> server-datadir-init.stderr.log

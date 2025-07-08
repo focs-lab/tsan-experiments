@@ -28,9 +28,15 @@ build-ready
 *.log
 *.json
 
-mysql-server*
-mysql-*.tar.gz
-/sql/mysql/benchmysql/data
+/sql/mysql/mysql-server*
+/sql/mysql/mysql-*.tar.gz
 /sql/mysql/downloads
 /sql/mysql/mysql-tsan*
 /sql/mysql/mysql-orig
+
+/sql/mysql/benchmysql/data
+/sql/mysql/benchmysql/old
+/sql/mysql/benchmysql/perf
+/sql/mysql/benchmysql/results
+/sql/mysql/benchmysql/vtune-results
+/sql/mysql/benchmysql/results*.csv
