@@ -30,7 +30,7 @@
 [ -z "$SYSBENCH_SCRIPTS_DIR" ] 		&& export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 [ -z "$SYSBENCH_CONNECTION_ARGS" ] 	&& export SYSBENCH_CONNECTION_ARGS="--mysql-user=root --mysql-socket=/tmp/mysql.sock "
 [ -z "$SYSBENCH_RUN_THREADS" ] 		&& export SYSBENCH_RUN_THREADS="$(( $(nproc) * 3 / 4 ))"
-[ -z "$SYSBENCH_RUN_SECONDS" ] 		&& export SYSBENCH_RUN_SECONDS="180"
+[ -z "$SYSBENCH_RUN_SECONDS" ] 		&& export SYSBENCH_RUN_SECONDS="60"
 
 [ -z "$SYSBENCH_RUN_ARGS" ] 		&& export SYSBENCH_RUN_ARGS="--threads=$SYSBENCH_RUN_THREADS --time=$SYSBENCH_RUN_SECONDS --rand-type=special"
 #--rand-type=uniform --report-interval=10

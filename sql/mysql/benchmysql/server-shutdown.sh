@@ -2,10 +2,13 @@ source callmysql-export-main-vars.sh
 
 set -e
 
-$MYSQL_DIR/mysqladmin --user=root --socket=/tmp/mysql.sock shutdown
+$MYSQL_DIR/mysqladmin --user=root --socket=/tmp/mysql.sock shutdown 
+#2> server-shutdown.stderr.log
 
-[ -f "PID_usr_bin_time_mysqld" ] && {
+if [ -f "PID_usr_bin_time_mysqld" ]; then
 	MYSQL_USR_BIN_TIME_PID=$(cat PID_usr_bin_time_mysqld)
+
+	[ "$BENCH_USE_TIME" != "true" ] && echo -e "\e[93mWarning: \$BENCH_USE_TIME is not 'true' but file 'PID_usr_bin_time_mysqld' exist (content \"$MYSQL_USR_BIN_TIME_PID\")."
 
 	[ -n "${MYSQL_USR_BIN_TIME_PID}" ] && [ "${MYSQL_USR_BIN_TIME_PID}" -ne 0 ] && {
 		echo "Waiting for \time PID $MYSQL_USR_BIN_TIME_PID to exit..."
@@ -20,4 +23,8 @@ $MYSQL_DIR/mysqladmin --user=root --socket=/tmp/mysql.sock shutdown
 	}
 
 	rm PID_usr_bin_time_mysqld
-}
+
+elif [ "$BENCH_USE_TIME" == "true" ]; then
+	echo -e "\e[93mWarning: \$BENCH_USE_TIME is 'true' but file 'PID_usr_bin_time_mysqld' does not exist."
+
+fi
