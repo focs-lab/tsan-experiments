@@ -1,7 +1,0 @@
-# Build arguments go here.
-# See "gn args <out_dir> --list" for available build arguments.
-dcheck_always_on = false
-is_component_build = false
-is_debug = true
-is_tsan = false
-target_cpu = "x64"
