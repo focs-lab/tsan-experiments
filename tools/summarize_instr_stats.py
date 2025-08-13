@@ -16,7 +16,7 @@ def summarize_tsan_logs():
         print(f"Error: Directory '{log_dir}' not found.", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Scanning files in {log_dir}...")
+    # print(f"Scanning files in {log_dir}...")
 
     # 2. Iterate over all files in the directory
     for filename in os.listdir(log_dir):
@@ -41,9 +41,10 @@ def summarize_tsan_logs():
                 print(f"Warning: Could not read file '{filename}'. Error: {e}. Skipping.", file=sys.stderr)
 
     # 4. Print the final sum
-    print("\n" + "="*50)
-    print(f"Total number of instrumented instructions: {total_instructions}")
-    print("="*50)
+    # print("\n" + "="*50)
+    # print(f"Total number of instrumented instructions: {total_instructions}")
+    # print("="*50)
+    print(f"{total_instructions}")
 
 if __name__ == "__main__":
     summarize_tsan_logs()
