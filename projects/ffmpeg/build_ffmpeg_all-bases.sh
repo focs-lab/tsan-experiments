@@ -2,19 +2,97 @@
 
 set -e
 
+# --- Variables ---
+RESULTS_DIR="results_ffmpeg"
+RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
+STATS_FILE="$RESULTS_DIR/instr_count.log"
+TSAN_TMP_DIR="/tmp/__tsan__"
+
+# --- Functions ---
+
+# Function for printing log messages
+log() {
+  echo "==> $1"
+}
+
+# Function to rename a directory if it exists by adding a numeric suffix if needed
+rename_dir_with_suffix() {
+  local dir_to_rename=$1
+  local dest_base_name=$2
+  if [ -d "$dir_to_rename" ]; then
+    local dest_dir="$dest_base_name"
+    if [ -d "$dest_dir" ]; then
+      local i=1
+      while [ -d "${dest_dir}${i}" ]; do
+        i=$((i+1))
+      done
+      dest_dir="${dest_dir}${i}"
+    fi
+    log "Renaming '$dir_to_rename' to '$dest_dir'"
+    mv "$dir_to_rename" "$dest_dir"
+  else
+    log "Directory '$dir_to_rename' not found, skipping."
+  fi
+}
+
+# --- Main Script ---
+
+# 1. Source the configuration definitions
 source ./config_definitions.sh || exit $?
 
-#BUILDTYPELIST="${!CONFIG_DETAILS[@]}"
-#BUILDTYPELIST="tsan-dom-ea-lo-st-swmr"
-#BUILDTYPELIST="orig tsan tsan-dom tsan-ea tsan-dom-ea tsan-lo tsan-dom-lo tsan-ea-lo tsan-dom-ea-lo tsan-loub tsan-dom-loub tsan-ea-loub tsan-dom-ea-loub tsan-lo-loub tsan-dom-lo-loub tsan-ea-lo-loub tsan-dom-ea-lo-loub tsan-st tsan-dom-st tsan-ea-st tsan-dom-ea-st tsan-lo-st tsan-dom-lo-st tsan-ea-lo-st tsan-dom-ea-lo-st tsan-loub-st tsan-dom-loub-st tsan-ea-loub-st tsan-dom-ea-loub-st tsan-lo-loub-st tsan-dom-lo-loub-st tsan-ea-lo-loub-st tsan-dom-ea-lo-loub-st tsan-swmr tsan-dom-swmr tsan-ea-swmr tsan-dom-ea-swmr tsan-lo-swmr tsan-dom-lo-swmr tsan-ea-lo-swmr tsan-dom-ea-lo-swmr tsan-loub-swmr tsan-dom-loub-swmr tsan-ea-loub-swmr tsan-dom-ea-loub-swmr tsan-lo-loub-swmr tsan-dom-lo-loub-swmr tsan-ea-lo-loub-swmr tsan-dom-ea-lo-loub-swmr tsan-st-swmr tsan-dom-st-swmr tsan-ea-st-swmr tsan-dom-ea-st-swmr tsan-lo-st-swmr tsan-dom-lo-st-swmr tsan-ea-lo-st-swmr tsan-dom-ea-lo-st-swmr tsan-loub-st-swmr tsan-dom-loub-st-swmr tsan-ea-loub-st-swmr tsan-dom-ea-loub-st-swmr tsan-lo-loub-st-swmr tsan-dom-lo-loub-st-swmr tsan-ea-lo-loub-st-swmr tsan-dom-ea-lo-loub-st-swmr"
-BUILDTYPELIST="orig tsan tsan-dom tsan-ea tsan-lo tsan-st tsan-swmr tsan-dom-ea-lo-st-swmr"
+# Check if CONFIG_DETAILS were loaded
+if [ ${#CONFIG_DETAILS[@]} -eq 0 ]; then
+    log "Error: Failed to load configuration definitions from config_definitions.sh"
+    exit 1
+fi
 
+# List of configurations to build
+BUILDTYPELIST="orig tsan tsan-dom tsan-ea tsan-lo tsan-st tsan-swmr tsan-dom-ea-lo-st-swmr"
 BUILDTYPELIST="$(echo $BUILDTYPELIST | xargs)"
 
-for i in $BUILDTYPELIST; do
-	echo -e "\n\e[94m ===== $i =====\e[0m\n"
+# 2. Create results directory and clear/create the results files
+log "Creating results directory: $RESULTS_DIR"
+mkdir -p "$RESULTS_DIR"
+echo "Compilation time (in seconds):" > "$RESULTS_FILE"
+log "Results file '$RESULTS_FILE' has been cleared."
+echo "Instrumented instruction count:" > "$STATS_FILE"
+log "Stats file '$STATS_FILE' has been cleared."
 
-	[ -d "ffmpeg-$i" ] && echo -e "\n\e[94mSkipping $i, exists already...\e[0m\n" && sleep 3 && continue
+log "Starting FFmpeg build for all configurations..."
 
-	./build_ffmpeg.sh $i
+# 3. Iterate over all configurations
+for config_name in $BUILDTYPELIST; do
+	log "===== Building configuration: $config_name ====="
+
+	if [ -d "ffmpeg-$config_name" ]; then
+		log "Skipping $config_name, directory already exists."
+		continue
+	fi
+
+	# Rename the temporary TSan directory before the build
+	rename_dir_with_suffix "$TSAN_TMP_DIR" "${TSAN_TMP_DIR}_ffmpeg_old"
+	mkdir -p "$TSAN_TMP_DIR"
+
+	# 4. Run the build and measure the time
+	start_time=$SECONDS
+	if ! ./build_ffmpeg.sh "$config_name"; then
+		log "Error building configuration: $config_name"
+		exit 1
+	fi
+	duration=$(( SECONDS - start_time ))
+	log "Finished building '$config_name' in $duration seconds."
+
+	# 5. Write the compilation time to the file
+	echo "$config_name: $duration" >> "$RESULTS_FILE"
+	log "Result for '$config_name' saved to $RESULTS_FILE"
+
+	# 6. Summarize and save instruction stats
+	log "Summarizing instruction statistics for $config_name"
+	instr_count=$(summarize_instr_stats.py)
+	log "Instrumented instructions: $instr_count"
+	echo "$config_name: $instr_count" >> "$STATS_FILE"
+	log "Result for '$config_name' saved to $STATS_FILE"
+	log "----------------------------------------"
 done
+
+log "Building all FFmpeg configurations completed. All results are in $RESULTS_DIR."
