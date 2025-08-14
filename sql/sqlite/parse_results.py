@@ -173,22 +173,126 @@ def generate_comparison_tables(all_data):
             print("".join(row))
 
 
+def generate_contention_tables(contention_data):
+    """
+    Builds and prints tables for the walthread1 contention experiment.
+    """
+    if not contention_data:
+        return
+
+    print("\n--- Table 3: walthread1 Contention Analysis (Slowdown vs. 'orig') ---")
+
+    non_instr_conf_name = 'orig'
+    tsan_conf_name = 'tsan'
+
+    # Get all unique thread counts and sort them
+    all_threads = sorted(list(set(thread for data in contention_data.values() for thread in data.keys())))
+    # Get all unique config names
+    all_configs = sorted(contention_data.keys())
+
+    # --- Table 1: Slowdown vs. Non-Instrumented Baseline ---
+    if non_instr_conf_name not in all_configs:
+        print(f"\nWarning: Non-instrumented baseline '{non_instr_conf_name}' not found for contention tests. Skipping slowdown table.")
+    else:
+        baseline_results = contention_data[non_instr_conf_name]
+        configs_to_compare = [name for name in all_configs if name != non_instr_conf_name]
+
+        header = f"{'Config':<20}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
+        print(header)
+        print("-" * len(header))
+
+        for config in configs_to_compare:
+            row = [f"{config:<20}"]
+            config_results = contention_data.get(config, {})
+            for thread_count in all_threads:
+                baseline_val = baseline_results.get(thread_count)
+                val = config_results.get(thread_count)
+                cell_str = "N/A"
+                if val is not None and baseline_val is not None and val > 0:
+                    slowdown = baseline_val / val
+                    cell_str = f"{int(val):,} ({slowdown:.2f}x slowdown)"
+                elif val is not None:
+                    cell_str = f"{int(val):,}"
+                row.append(f"{cell_str:<25}")
+            print("".join(row))
+
+    # --- Table 2: Speedup vs. Default TSan Baseline ---
+    print(f"\n--- Table 4: walthread1 Contention Analysis (Speedup vs. '{tsan_conf_name}') ---")
+    if tsan_conf_name not in all_configs:
+        print(f"\nWarning: TSan baseline '{tsan_conf_name}' not found for contention tests. Skipping speedup table.")
+    else:
+        tsan_baseline_results = contention_data[tsan_conf_name]
+        # Compare only configs starting with 'tsan-' but are not the baseline itself
+        tsan_configs_to_compare = [
+            name for name in all_configs if name.startswith(tsan_conf_name + '-')
+        ]
+
+        if not tsan_configs_to_compare:
+            print("No optimized TSan configurations (e.g., 'tsan-*') found for contention tests.")
+            return
+
+        header = f"{'Config':<20}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
+        print(header)
+        print("-" * len(header))
+
+        for config in tsan_configs_to_compare:
+            row = [f"{config:<20}"]
+            config_results = contention_data.get(config, {})
+            for thread_count in all_threads:
+                tsan_baseline_val = tsan_baseline_results.get(thread_count)
+                val = config_results.get(thread_count)
+                cell_str = "N/A"
+
+                if val is not None and tsan_baseline_val is not None and tsan_baseline_val > 0:
+                    speedup = val / tsan_baseline_val
+                    cell_str = f"{int(val):,} ({speedup:.2f}x speedup)"
+                elif val is not None:
+                    cell_str = f"{int(val):,}"
+
+                row.append(f"{cell_str:<25}")
+            print("".join(row))
+
+
 def main():
     """
     Main function: finds files, parses them, and prints comparison tables.
     """
-    log_files = glob.glob(os.path.join(RESULTS_DIR, '*.log'))
+    # Use recursive glob to find files in subdirectories
+    log_files = glob.glob(os.path.join(RESULTS_DIR, '**', '*.log'), recursive=True)
     if not log_files:
-        print(f"Error: No result files found in the '{RESULTS_DIR}' directory.")
+        print(f"Error: No result files found in the '{RESULTS_DIR}' directory or its subdirectories.")
         return
 
     all_data = {}
+    # Data for walthread1 contention tests: {'config': {threads: value}}
+    contention_data = defaultdict(dict)
+
+    # Regex to identify contention experiment files, e.g., "tsan-ea_7threads.log"
+    contention_re = re.compile(r'(.+)_(\d+)threads$')
+
     for f in log_files:
-        conf_name = os.path.splitext(os.path.basename(f))[0]
-        print(f"Parsing file: {f} (config: {conf_name})")
-        all_data[conf_name] = parse_log_file(f)
+        # Get the filename without extension, e.g., "tsan-ea_7threads"
+        base_name = os.path.splitext(os.path.basename(f))[0]
+
+        match = contention_re.match(base_name)
+
+        if match:
+            # This is a contention experiment file
+            conf_name, threads_str = match.groups()
+            threads = int(threads_str)
+
+            print(f"Parsing contention file: {f} (config: {conf_name}, threads: {threads})")
+            parsed = parse_log_file(f)
+            if 'walthread1' in parsed:
+                contention_data[conf_name][threads] = parsed['walthread1']
+        else:
+            # This is a regular experiment file
+            conf_name = base_name
+            print(f"Parsing file: {f} (config: {conf_name})")
+            all_data[conf_name] = parse_log_file(f)
 
     generate_comparison_tables(all_data)
+    generate_contention_tables(contention_data)
 
 
 if __name__ == "__main__":

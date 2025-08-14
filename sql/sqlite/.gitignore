@@ -3,3 +3,4 @@ build
 *.db
 *.db-wal
 *.db-shm
+results-*

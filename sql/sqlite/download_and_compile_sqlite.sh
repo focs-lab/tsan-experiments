@@ -13,6 +13,9 @@ if [ ! -d "sqlite-src-3500200" ]; then
     unzip sqlite-src-3500200.zip
 fi
 
+# Copy local threadtest.c to SQLite test folder
+cp threadtest.c sqlite-src-3500200/test/threadtest.c
+
 # Create the build directory, removing the old one if it exists
 rm -rf build
 mkdir -p build
