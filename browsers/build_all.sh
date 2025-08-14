@@ -82,6 +82,7 @@ log "Copying args.gn for $CONFIG_NAME"
 cp "$ARGS_GN_TEMPLATE_DIR/args.gn.orig" "$CURRENT_OUT_DIR/args.gn"
 
 log "Building original configuration: chrome-$CONFIG_NAME"
+SECONDS=0
 start_time=$SECONDS
 autoninja -C "$CURRENT_OUT_DIR" chrome
 duration=$(( SECONDS - start_time ))
@@ -123,6 +124,7 @@ for config_file in "$CONFIG_DIR"/BUILD.gn.*; do
 
   # 7. Run the build and measure the time
   log "Running autoninja for chrome-$CONFIG"
+  SECONDS=0
   start_time=$SECONDS
   autoninja -C "$CURRENT_OUT_DIR" chrome
   duration=$(( SECONDS - start_time ))
