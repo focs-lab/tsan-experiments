@@ -9,10 +9,9 @@ BUILD_GN_PATH="$CONFIG_DIR/BUILD.gn"
 ARGS_GN_TEMPLATE_DIR="args.gn"
 RESULTS_DIR="__results__"
 RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
-STATS_DIR="$RESULTS_DIR/stats"
-STATS_FILE="$STATS_DIR/instr_count.log"
+STATS_FILE="$RESULTS_DIR/instr_count.log"
 OUT_DIR="out"
-TSAN_DIR="tsan"
+TSAN_DIR="/tmp/__tsan__"
 
 # --- Functions ---
 
@@ -52,16 +51,12 @@ log "Creating results directory: $RESULTS_DIR"
 mkdir -p "$RESULTS_DIR"
 echo "Compilation time (in seconds):" > "$RESULTS_FILE"
 log "Results file '$RESULTS_FILE' has been cleared."
+echo "Instrumented instruction count:" > "$STATS_FILE"
+log "Stats file '$STATS_FILE' has been cleared."
+echo ""
 
 log "Creating new output directory: $OUT_DIR"
 mkdir -p "$OUT_DIR"
-
-# Create stats directory and file
-log "Creating stats directory: $STATS_DIR"
-mkdir -p "$STATS_DIR"
-echo "Instrumented instruction count:" > "$STATS_FILE"
-log "Stats file '$STATS_FILE' has been created."
-echo ""
 
 # 2. Back up the original BUILD.gn
 if [ -f "$BUILD_GN_PATH" ]; then
@@ -83,9 +78,8 @@ cp "$ARGS_GN_TEMPLATE_DIR/args.gn.orig" "$CURRENT_OUT_DIR/args.gn"
 
 log "Building original configuration: chrome-$CONFIG_NAME"
 SECONDS=0
-start_time=$SECONDS
 autoninja -C "$CURRENT_OUT_DIR" chrome
-duration=$(( SECONDS - start_time ))
+duration=$SECONDS
 log "Finished in $duration seconds."
 echo "$CONFIG_NAME: $duration" >> "$RESULTS_FILE"
 log "Result for '$CONFIG_NAME' saved to $RESULTS_FILE"
@@ -118,16 +112,15 @@ for config_file in "$CONFIG_DIR"/BUILD.gn.*; do
 
   log "Copying $config_file to $BUILD_GN_PATH"
   cp "$config_file" "$BUILD_GN_PATH"
-  
+
   # Rename tsan dir before build
   rename_dir_with_suffix "$TSAN_DIR" "__tsan__chromium_old"
 
   # 7. Run the build and measure the time
   log "Running autoninja for chrome-$CONFIG"
   SECONDS=0
-  start_time=$SECONDS
   autoninja -C "$CURRENT_OUT_DIR" chrome
-  duration=$(( SECONDS - start_time ))
+  duration=$SECONDS
   log "Finished in $duration seconds."
 
   # 8. Write the result to the file
