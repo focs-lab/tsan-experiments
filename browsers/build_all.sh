@@ -120,7 +120,7 @@ for config_file in "$CONFIG_DIR"/BUILD.gn.*; do
   cp "$config_file" "$BUILD_GN_PATH"
   
   # Rename tsan dir before build
-  rename_dir_with_suffix "$TSAN_DIR" "__tsan__old"
+  rename_dir_with_suffix "$TSAN_DIR" "__tsan__chromium_old"
 
   # 7. Run the build and measure the time
   log "Running autoninja for chrome-$CONFIG"
