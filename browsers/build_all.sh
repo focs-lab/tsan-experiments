@@ -39,13 +39,14 @@ rename_dir_with_suffix() {
   else
     log "'$dir_to_rename' directory not found, skipping rename."
   fi
+  mkdir -p $dir_to_rename
 }
 
 # --- Main Script ---
 
 # 0. Rename old directories
 rename_dir_with_suffix "$OUT_DIR" "out_old"
-rename_dir_with_suffix "$TSAN_DIR" "__tsan__old"
+rename_dir_with_suffix "$TSAN_DIR" "__tsan__chrome_old"
 
 # 1. Create the results and output directories
 log "Creating results directory: $RESULTS_DIR"
@@ -84,6 +85,7 @@ cp "$ARGS_GN_TEMPLATE_DIR/args.gn.orig" "$CURRENT_OUT_DIR/args.gn"
 log "Building original configuration: chrome-$CONFIG_NAME"
 SECONDS=0
 start_time=$SECONDS
+gn gen "$CURRENT_OUT_DIR"
 autoninja -C "$CURRENT_OUT_DIR" chrome
 duration=$(( SECONDS - start_time ))
 log "Finished in $duration seconds."
@@ -120,12 +122,13 @@ for config_file in "$CONFIG_DIR"/BUILD.gn.*; do
   cp "$config_file" "$BUILD_GN_PATH"
   
   # Rename tsan dir before build
-  rename_dir_with_suffix "$TSAN_DIR" "__tsan__old"
+  rename_dir_with_suffix "$TSAN_DIR" "__tsan__chrome_old"
 
   # 7. Run the build and measure the time
   log "Running autoninja for chrome-$CONFIG"
   SECONDS=0
   start_time=$SECONDS
+  gn gen "$CURRENT_OUT_DIR"
   autoninja -C "$CURRENT_OUT_DIR" chrome
   duration=$(( SECONDS - start_time ))
   log "Finished in $duration seconds."
