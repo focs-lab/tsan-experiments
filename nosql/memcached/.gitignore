@@ -4,4 +4,4 @@ memtier*
 memcached_pid
 memcached_type
 __results_memcached__/*
-results/*
+results*/*
