@@ -22,6 +22,7 @@ SCRIPT_DIR=$(dirname $(realpath -s "$0"))
 
 # Results and statistics directories
 RESULTS_DIR="__results_redis__"                # Main results directory
+TRACES_DIR="__traces_redis__"                  # Traces directory
 RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
 STATS_FILE="$RESULTS_DIR/instr_count.txt"
 TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary directory
@@ -50,9 +51,10 @@ BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
 #------------------------------------------------------------------------------
 COMPILE=true
 TESTS=true
+TRACE_MODE=false
 
 usage() {
-    echo "Usage: $0 [ --compile-only | --test-only | --help ]"
+    echo "Usage: $0 [ --compile-only | --test-only | trace | --help ]"
     echo ""
     echo "This script builds and benchmarks Redis with various configurations."
     echo ""
@@ -60,6 +62,8 @@ usage() {
     echo "  --compile-only   Run only the compilation part of the script."
     echo "  --test-only      Run only the benchmark tests. Assumes that the"
     echo "                   project has been compiled beforehand."
+    echo "  trace            Enable trace mode. This reduces the benchmark load"
+    echo "                   and redirects server output to trace files."
     echo "  --help, -h       Display this help message and exit."
     echo ""
     echo "By default (with no options), the script runs both compilation and tests."
@@ -70,23 +74,34 @@ log() {
     echo "==> $1"
 }
 
-# Parse command-line arguments
-if [[ "$1" == "--help" || "$1" == "-h" ]]; then
-    usage
-    exit 0
+# --- Argument Parsing ---
+for arg in "$@"; do
+    case "$arg" in
+        --help|-h)
+            usage
+            exit 0
+            ;;
+        --compile-only)
+            TESTS=false
+            ;;
+        --test-only)
+            COMPILE=false
+            ;;
+        trace)
+            TRACE_MODE=true
+            ;;
+    esac
+done
+
+if [ "$TRACE_MODE" = true ]; then
+    log "Trace mode enabled."
+fi
+if [ "$COMPILE" = true ] && [ "$TESTS" = false ]; then
+    log "Running in compile-only mode."
+elif [ "$TESTS" = true ] && [ "$COMPILE" = false ]; then
+    log "Running in test-only mode."
 fi
 
-if [[ "$1" == "--compile-only" ]]; then
-    TESTS=false
-    log "Running in compile-only mode."
-elif [[ "$1" == "--test-only" ]]; then
-    COMPILE=false
-    log "Running in test-only mode."
-elif [[ -n "$1" ]]; then
-    echo "Error: Unknown option '$1'."
-    usage
-    exit 1
-fi
 
 # --- Prerequisite Check ---
 [ -z "$LLVM_BUILD_DIR" ] && { echo -e "No LLVM_BUILD_DIR set\n  Example: /home/user/llvm-project/build-release"; exit 1; }
@@ -156,8 +171,8 @@ function run {
     echo -n "$TEST " | tee -a "$FILE"
     redis-benchmark/src/redis-benchmark \
         -P 1024 \
-        -n $REQUESTS \
-        -t $TEST | grep throughput | tail -1 | awk '{print $3}' | tee -a "$FILE"
+        -n "$REQUESTS" \
+        -t "$TEST" | grep throughput | tail -1 | awk '{print $3}' | tee -a "$FILE"
 }
 
 # --- Main Script ---
@@ -293,57 +308,80 @@ if [ "$TESTS" = true ]; then
             log "Run the script without --test-only first to create the builds."
             exit 1
         fi
-        cd "$BENCH_POLYGON_DIR"
-        # A simple check to see if builds might be present
-        if [ ! -d "redis-orig" ]; then
-            log "Warning: 'redis-orig' build not found. Assuming other builds exist."
-        fi
-        if [ ! -d "$RESULTS_DIR" ]; then
-            log "Results directory '$RESULTS_DIR' not found. Creating it."
-            mkdir -p "$RESULTS_DIR"
-        fi
+        cd "$BENCH_POLYGON_DIR" || exit
+    fi
+
+    # A simple check to see if builds might be present
+    if [ ! -d "redis-orig" ]; then
+        log "Warning: 'redis-orig' build not found. Assuming other builds exist."
+    fi
+    if [ ! -d "$RESULTS_DIR" ]; then
+        log "Results directory '$RESULTS_DIR' not found. Creating it."
+        mkdir -p "$RESULTS_DIR"
     fi
 
     cp -r "$SCRIPT_DIR/redis.conf" .
 
-    #------------------------------------------------------------------------------
-    # Benchmark Tests
-    #------------------------------------------------------------------------------
-    # Run benchmark tests for each build configuration
-    # Tests various Redis operations with different data sizes and patterns
+    # --- Benchmark Settings ---
+    REQ_GENERAL=1000000
+    REQ_LRANGE100=50000
+    REQ_LRANGE300=10000
+    REQ_LRANGE500=5000
+    REQ_LRANGE600=3000
+    REQ_MSET=100000
+
+    if [ "$TRACE_MODE" = true ]; then
+        log "Reducing benchmark load for trace mode."
+        mkdir -p "$TRACES_DIR"
+
+        REQ_GENERAL=$((REQ_GENERAL / 100))
+        REQ_LRANGE100=$((REQ_LRANGE100 / 100))
+        REQ_LRANGE300=$((REQ_LRANGE300 / 100))
+        REQ_LRANGE500=$((REQ_LRANGE500 / 100))
+        REQ_LRANGE600=$((REQ_LRANGE600 / 100))
+        REQ_MSET=$((REQ_MSET / 100))
+    fi
+
+    # --- Benchmark Loop ---
     for OPTION in $BUILD_OPTIONS
     do
         log "Testing $OPTION"
-        # Create a separate results directory for benchmarks to avoid overwriting compilation stats
         mkdir -p "$RESULTS_DIR/benchmarks"
         
-        echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
-        /usr/bin/time --verbose "redis-$OPTION/src/redis-server" redis.conf |& grep Maximum | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
+        if [ "$TRACE_MODE" = true ]; then
+            TRACE_FILE="$TRACES_DIR/${OPTION}.trace"
+            log "Redirecting trace output to $TRACE_FILE"
+            "redis-$OPTION/src/redis-server" redis.conf > "$TRACE_FILE" 2>&1 &
+        else
+            echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
+            /usr/bin/time --verbose "redis-$OPTION/src/redis-server" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
+        fi
         
         sleep 5
         
+        # For 'orig' build, append "0" to request count, effectively multiplying it by 10.
         [[ "$OPTION" = "orig" ]] && L="0" || L=""
         
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_INLINE 1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_MBULK  1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SET         1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" GET         1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" INCR        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPUSH       1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPOP        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPOP        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SADD        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" HSET        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SPOP        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZADD        1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZPOPMIN     1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       1000000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_100  50000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_300  10000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_500  5000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_600  3000$L
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" MSET        100000$L
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_INLINE "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_MBULK  "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SET         "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" GET         "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" INCR        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPUSH       "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPOP        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPOP        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SADD        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" HSET        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SPOP        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZADD        "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZPOPMIN     "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       "${REQ_GENERAL}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_100  "${REQ_LRANGE100}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_300  "${REQ_LRANGE300}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_500  "${REQ_LRANGE500}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_600  "${REQ_LRANGE600}${L}"
+        run "$RESULTS_DIR/benchmarks/$OPTION.txt" MSET        "${REQ_MSET}${L}"
         
         killall -9 redis-server
         sleep 5
