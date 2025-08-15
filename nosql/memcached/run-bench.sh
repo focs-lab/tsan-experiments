@@ -2,13 +2,24 @@
 
 NTHREADS=10
 NTESTS=2
+MEMTIER_EXTRA_ARGS=""
+
+# Check for trace argument
+for arg in "$@"; do
+    if [ "$arg" = "trace" ]; then
+        MEMTIER_EXTRA_ARGS="--requests 500"
+        NTESTS=1
+        break
+    fi
+done
 
 mkdir -p results
 
 ./memtier_benchmark-2.1.1/memtier_benchmark \
 	--hide-histogram -t $NTHREADS -p 7777 -x $NTESTS --pipeline 16 -P memcache_text \
     --random-data \
-    $@ | tee "results/$(cat memcached_type)_results.txt"
+    $MEMTIER_EXTRA_ARGS \
+    | tee "results/$(cat memcached_type)_results.txt"
 
 echo -e "\e[94mmemcached type: $(cat memcached_type)\e[m"
 

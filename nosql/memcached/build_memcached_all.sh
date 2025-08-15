@@ -8,6 +8,7 @@ RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
 STATS_FILE="$RESULTS_DIR/instr_count.log"
 TSAN_TMP_DIR="/tmp/__tsan__"
 
+mkdir -p $RESULTS_DIR
 > $STATS_FILE
 
 # --- Functions ---
