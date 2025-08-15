@@ -1,5 +1,8 @@
 #!/bin/bash
 
+ls benchmark_*.txt || { echo "No benchmarks."; exit 1; }
+
+
 CSV_OUTPUT_FILE="results_mysql_$(date +%y%m%d_%H%M).csv"
 
 echo "MySQL build,Sysbench script,Transactions/sec,Queries/sec,Memory peak (kb),Read ops,Write ops,Other ops,Total" > "$CSV_OUTPUT_FILE"

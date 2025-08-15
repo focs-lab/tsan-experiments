@@ -5,8 +5,10 @@ set -e
 source ./config_definitions.sh || exit $?
 
 #BUILDTYPELIST="tsan   tsan-swmr   tsan-lo"
-#BUILDTYPELIST="tsan   tsan-dom-ea-lo-st-swmr   tsan-dom   tsan-ea   tsan-st   tsan-swmr   tsan-lo"
-BUILDTYPELIST="${!CONFIG_DETAILS[@]}"
+BUILDTYPELIST="tsan   tsan-dom-ea-lo-st-swmr   tsan-dom   tsan-ea   tsan-st   tsan-swmr   tsan-lo   tsan-loub"
+#BUILDTYPELIST="${!CONFIG_DETAILS[@]} tsan-dom-ea-lo-st-swmr"
+
+#echo $BUILDTYPELIST | xargs -n1 echo; exit
 
 
 # === Internal section ===

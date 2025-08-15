@@ -36,19 +36,20 @@ fi
 
 
 echo -e "\e[95m$LAUNCH_COMMAND"
-eval "$LAUNCH_COMMAND" &
+eval "$LAUNCH_COMMAND" 2> server-run.stderr.log &
+
 LAUNCH_COMMAND_PID=$!
 
 
 #/usr/bin/time -v -o "time.log" bash -c "$LAUNCH_COMMAND" &
-#2> server-run.stderr.log
+
 
 if [ "$BENCH_USE_TIME" = "true" ]; then
 	echo "$LAUNCH_COMMAND_PID" > "PID_usr_bin_time_mysqld"
 fi
 
 
-TIMEOUT_MAX=50
+TIMEOUT_MAX=900
 TIMEOUT_CUR=0
 
 while ! ./server-check-connection.sh ; do
@@ -64,6 +65,8 @@ while ! ./server-check-connection.sh ; do
 		exit 3
 	fi
 
-	echo -e "\e[94mWaiting for estabilishing the server main worker loop...\e[m"
+	echo -e "\e[94mWaiting for estabilishing the server main worker loop ($TIMEOUT_CUR/$TIMEOUT_MAX)...\e[m"
 	sleep 1
 done
+
+echo -e "\e[94mWaiting finished at $TIMEOUT_CUR/$TIMEOUT_MAX."

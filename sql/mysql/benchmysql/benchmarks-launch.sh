@@ -6,14 +6,14 @@ export MYSQL_BUILDS_DIR=".."
 
 export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 
-#SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
-SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_read_write.lua)"
-
-SYSBENCH_ALL_SCRIPTS="$(echo $SYSBENCH_ALL_SCRIPTS | xargs basename -a | grep -v oltp_common\.lua | xargs)"
+SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
+# Or override with some specific scripts:
+SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua"
 
 
 export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
 
+# Force using of VTune or `time`:
 INSCRIPT_BENCH_USE_VTUNE="false"
 INSCRIPT_BENCH_USE_TIME="false"
 
@@ -21,11 +21,7 @@ INSCRIPT_BENCH_USE_TIME="false"
 #MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed "s/[,\n\t]/ /g" | sed "s/\s\s\+/ /g")
 MYSQLBUILDLIST=$(ls -d "$MYSQL_BUILDS_DIR"/mysql-tsan "$MYSQL_BUILDS_DIR"/mysql-tsan-* "$MYSQL_BUILDS_DIR"/mysql-orig | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs basename -a | xargs)
 
-#MYSQLBUILDLIST="mysql-tsan"
-
-# Debug string with exit:
-#echo "$MYSQLBUILDLIST" && echo && echo "$SYSBENCH_ALL_SCRIPTS" && exit
-
+#MYSQLBUILDLIST="mysql-tsan-dom-ea-lo-st-swmr"
 
 
 logmessage() {
@@ -34,19 +30,32 @@ logmessage() {
 
 set -e
 
+export MYSQL_DIR="$MYSQL_BUILDS_DIR/$(echo $MYSQLBUILDLIST | tr ' ' '\n' | head -n1)/bin"
 ./server-datadir-init.sh || logmessage "Server datadir initialized already."
-
 
 export BENCH_USE_TIME=false
 export BENCH_USE_VTUNE=false
 
+SYSBENCH_ALL_SCRIPTS="$(echo $SYSBENCH_ALL_SCRIPTS | xargs basename -a | grep -v oltp_common\.lua | xargs)"
+
+
 [ "$INSCRIPT_BENCH_USE_TIME" = "true" ] && export BENCH_USE_TIME=true
 [ "$INSCRIPT_BENCH_USE_VTUNE" = "true" ] && export BENCH_USE_VTUNE=true
+BENCH_RUN_OPTION=false
+
+print_usage() {
+	logmessage "Usage:
+	$0 \t\t\t Print the data about run
+	$0 -r|--run\t\t Run benchmarks
+	$0 -t|--time\t Add '/usr/bin/time' call to run
+	$0 --vtune\t\t Add VTune profiling to run
+	$0 -h|--help\t Show this help"
+}
 
 # Args parsing:
 while true; do
 	case "$1" in
-		"--time")
+		"--time"|"-t")
 		    logmessage "Time and peak memory profiling (via /usr/bin/time) will be enabled for runs."
 			export BENCH_USE_TIME=true
 			;;
@@ -54,9 +63,16 @@ while true; do
 		    logmessage "VTune profiling will be enabled for runs."
 			export BENCH_USE_VTUNE=true
 			;;
+		"--run"|"-r")
+			BENCH_RUN_OPTION=true
+			;;
 		"-h"|"--help")
-		    logmessage "Usage: \n\t$0 [--vtune|--time]\t Run benchmarks (also with VTune or '/usr/bin/time')\n\t$0 -h|--help\t Show this help"
+			print_usage
 			exit 0
+			;;
+		"") ;;
+		*)	echo "Wrong arg '$1'."
+			exit 1
 			;;
 	esac
 
@@ -69,8 +85,17 @@ if [[ "$BENCH_USE_TIME" == "true" && "$BENCH_USE_VTUNE" == "true" ]]; then
 	exit 1
 fi
 
-#echo time $BENCH_USE_TIME, vtune $BENCH_USE_VTUNE
-#exit
+
+# Debug strings:
+echo -e "\$MYSQLBUILDLIST:\n$MYSQLBUILDLIST\n"
+echo -e "\$SYSBENCH_ALL_SCRIPTS:\n$SYSBENCH_ALL_SCRIPTS\n"
+echo "Use /usr/bin/time : $BENCH_USE_TIME"
+echo "Use VTune         : $BENCH_USE_VTUNE"
+
+if [ "$BENCH_RUN_OPTION" != "true" ]; then
+	logmessage "Type \"\e[96m$0 --run\e[94m\" to launch the benchmarks!\n  Type \"\e[96m$0 --help\e[94m\" to get the full help."
+	exit
+fi
 
 
 for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
@@ -81,15 +106,15 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 
 		export MYSQL_DIR="$MYSQL_BUILDS_DIR/$BUILD/bin"
 		export SYSBENCH_SCRIPT_FILENAME="$BENCHSCRIPT"
-		#export SYSBENCH_RUN_SECONDS=60
+		#export SYSBENCH_RUN_SECONDS=10
 
 		if [ "$BENCH_USE_VTUNE" = "true" ]; then
-			vtune_result_dir="vtune_results/${BUILD}_${BENCHSCRIPT%.lua}"
-			[ -d "$vtune_result_dir" ] && echo "Moving previous '$vtune_result_dir' to '$vtune_result_dir-old'" && mv -f "$vtune_result_dir" "$vtune_result_dir-old"
+			VTUNE_RESULT_DIR="vtune_results/${BUILD}_${BENCHSCRIPT%.lua}"
+			[ -d "$VTUNE_RESULT_DIR" ] && echo "Moving previous '$VTUNE_RESULT_DIR' to '$VTUNE_RESULT_DIR-old'" && mv -f "$VTUNE_RESULT_DIR" "$VTUNE_RESULT_DIR-old"
 
-			mkdir -p "$vtune_result_dir"
-			export V_TUNE_RESULT_DIR="$vtune_result_dir"
-			echo "VTune results will be saved to $vtune_result_dir"
+			mkdir -p "$VTUNE_RESULT_DIR"
+			export V_TUNE_RESULT_DIR="$VTUNE_RESULT_DIR"
+			echo "VTune results will be saved to $VTUNE_RESULT_DIR"
 		fi
 
 		[ ! -f "$MYSQL_DIR/mysqld" ] && logmessage "\e[93mNo MyQSL found at \"$MYSQL_DIR\", skipping." && continue

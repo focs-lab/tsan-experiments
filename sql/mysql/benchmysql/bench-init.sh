@@ -3,7 +3,7 @@ source callmysql-export-main-vars.sh
 
 set -e
 
-$MYSQL_DIR/mysql --user=root -e "CREATE DATABASE IF NOT EXISTS sbtest;"
+$MYSQL_DIR/mysql --user=root -e "CREATE DATABASE IF NOT EXISTS sbtest;" 2> bench-init.stderr.log
 
 # Query the information_schema to see if the table exists.
 SBTEST1_EXISTS=$($MYSQL_DIR/mysql --batch --skip-column-names --user=root -e "SELECT TABLE_NAME FROM information_schema.tables WHERE TABLE_SCHEMA = 'sbtest' AND TABLE_NAME = 'sbtest1';")

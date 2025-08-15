@@ -178,7 +178,7 @@ mkdir -p "$RESULT_DIR_NAME"
 #fi
 
 
-# Check for 
+# Integrity check for CMake:
 [ ! -d "$PROJECT_SRC_DIR" ] && echo "No project dir $PROJECT_SRC_DIR!" && exit 6
 [ ! -f "$PROJECT_SRC_DIR/CMakeLists.txt" ] && echo "No CMakeLists in the $PROJECT_SRC_DIR!" && exit 5
 
@@ -236,7 +236,8 @@ echo "--- Building MySQL ($CONFIG_TYPE) ---"
 NUM_JOBS=${NPROC:-$(($(nproc) * 7 / 8))}
 echo "Using $NUM_JOBS jobs for make."
 
-cmake --build "$BUILD_DIR_NAME" -j $NUM_JOBS 2> make.stderr.log \
+/usr/bin/time -v -o "mysql-build-time_${CONFIG_TYPE}.log" \
+	cmake --build "$BUILD_DIR_NAME" -j $NUM_JOBS 2> make.stderr.log \
 	|| BUILD_ERRORCODE="$?"
 
 if [ -n "$BUILD_ERRORCODE" ]; then
