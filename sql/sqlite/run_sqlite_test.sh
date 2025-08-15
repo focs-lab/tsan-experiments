@@ -27,6 +27,13 @@ RESULTS_DIR="results"
 VTUNE_RESULTS_ROOT="vtune_results"
 mkdir -p "$RESULTS_DIR"
 
+# Prepare memory results file
+MEMORY_RESULTS_FILE="$RESULTS_DIR/memory.txt"
+# If the memory results file doesn't exist, create it with a header
+if [ ! -f "$MEMORY_RESULTS_FILE" ]; then
+    echo -e "configuration\tmemory (KB)" > "$MEMORY_RESULTS_FILE"
+fi
+
 # --- Executable Validation ---
 if [ ! -x "$EXECUTABLE_PATH" ]; then
   echo "Error: Test executable not found or not executable at '$EXECUTABLE_PATH'."
@@ -81,11 +88,19 @@ fi
 echo "Executable: $EXECUTABLE_PATH"
 echo "Full Command: $CMD"
 echo "Output will be saved to: $RESULT_FILE"
+echo "Memory usage will be saved to: $MEMORY_RESULTS_FILE"
 echo "Running, please wait..."
+
+# Prepend the /usr/bin/time command to capture memory usage.
+# -a appends to the output file.
+# -o specifies the output file for the time command.
+# -f formats the output. %M gives the maximum resident set size in Kilobytes.
+# We use a tab character for formatting.
+TIME_CMD="/usr/bin/time -a -o $MEMORY_RESULTS_FILE -f '$CONFIG_TYPE\t%M'"
 
 # Execute the command, redirecting both stdout and stderr to the result file.
 # Using 'eval' to ensure the command string with its arguments and potential quotes is parsed correctly by the shell.
-eval $CMD &> "$RESULT_FILE"
+eval $TIME_CMD $CMD &> "$RESULT_FILE"
 
 # Check the exit code of the executed command
 if [ $? -eq 0 ]; then
