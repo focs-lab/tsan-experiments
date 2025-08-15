@@ -3,7 +3,17 @@ source callmysql-export-main-vars.sh || exit $?
 ./server-check-connection.sh && echo "Already launched." && exit 1
 
 
-LAUNCH_COMMAND="$MYSQL_DIR/mysqld --datadir=\\\"$MYSQL_DATA_DIR\\\""
+# Base command
+declare -a mysql_cmd=(
+    "$MYSQL_DIR/mysqld"
+    "--datadir=$MYSQL_DATA_DIR"
+)
+
+# Base command
+declare -a mysql_cmd=(
+    "$MYSQL_DIR/mysqld"
+    "--datadir=$MYSQL_DATA_DIR"
+)
 
 # VTune run:
 if [ "$BENCH_USE_VTUNE" = "true" ]; then
@@ -17,36 +27,34 @@ if [ "$BENCH_USE_VTUNE" = "true" ]; then
         exit 1
     fi
 
-    vtune_options="--collect=$vtune_analysis_type --result-dir=$V_TUNE_RESULT_DIR \
-                   -knob sampling-mode=$vtune_sampling_mode \
-                   -knob enable-stack-collection=true \
-                   -data-limit=5000"
+    declare -a vtune_cmd=(
+        "vtune"
+        "--collect=$vtune_analysis_type"
+        "--result-dir=$V_TUNE_RESULT_DIR"
+        "-knob" "sampling-mode=$vtune_sampling_mode"
+        "-knob" "enable-stack-collection=true"
+        "-data-limit=5000"
+        "--"
+    )
 
-    LAUNCH_COMMAND="vtune $vtune_options -- $LAUNCH_COMMAND"
+    mysql_cmd=("${vtune_cmd[@]}" "${mysql_cmd[@]}")
 fi
+
 
 # Time/Memory run:
 if [ "$BENCH_USE_TIME" = "true" ]; then
-	LAUNCH_COMMAND="/usr/bin/time -v -o time.log bash -c \"$LAUNCH_COMMAND\""
+	echo -e "\e[95m/usr/bin/time -v -o time.log "${mysql_cmd[@]}" &\e[0m"
+
+    /usr/bin/time -v -o time.log "${mysql_cmd[@]}" 2> server-run.stderr.log &
+    LAUNCH_COMMAND_PID=$!
+
+    echo "$LAUNCH_COMMAND_PID" > "PID_time_mysql_launched"
+else
+	echo -e "\e[95m"${mysql_cmd[@]}" &\e[0m"
+    "${mysql_cmd[@]}" 2> server-run.stderr.log &
+    #LAUNCH_COMMAND_PID=$!
 fi
 
-if [ "$BENCH_USE_VTUNE" != "true" ] && [ "$BENCH_USE_TIME" != "true" ]; then
-	LAUNCH_COMMAND="bash -c \"$LAUNCH_COMMAND\""
-fi
-
-
-echo -e "\e[95m$LAUNCH_COMMAND"
-eval "$LAUNCH_COMMAND" 2> server-run.stderr.log &
-
-LAUNCH_COMMAND_PID=$!
-
-
-#/usr/bin/time -v -o "time.log" bash -c "$LAUNCH_COMMAND" &
-
-
-if [ "$BENCH_USE_TIME" = "true" ]; then
-	echo "$LAUNCH_COMMAND_PID" > "PID_usr_bin_time_mysqld"
-fi
 
 
 TIMEOUT_MAX=900

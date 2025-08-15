@@ -6,8 +6,8 @@ export MYSQL_BUILDS_DIR=".."
 
 export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 
-SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
-# Or override with some specific scripts:
+# Select all or override with some specific scripts:
+#SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
 SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua"
 
 
@@ -18,10 +18,10 @@ INSCRIPT_BENCH_USE_VTUNE="false"
 INSCRIPT_BENCH_USE_TIME="false"
 
 
+# Select all or override with some specific builds:
 #MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed "s/[,\n\t]/ /g" | sed "s/\s\s\+/ /g")
 MYSQLBUILDLIST=$(ls -d "$MYSQL_BUILDS_DIR"/mysql-tsan "$MYSQL_BUILDS_DIR"/mysql-tsan-* "$MYSQL_BUILDS_DIR"/mysql-orig | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs basename -a | xargs)
-
-#MYSQLBUILDLIST="mysql-tsan-dom-ea-lo-st-swmr"
+#MYSQLBUILDLIST="mysql-tsan-dom-ea-lo-st-swmr mysql-orig mysql-tsan mysql-tsan-dom"
 
 
 logmessage() {
@@ -53,7 +53,7 @@ print_usage() {
 }
 
 # Args parsing:
-while true; do
+while [ -n "$1" ]; do
 	case "$1" in
 		"--time"|"-t")
 		    logmessage "Time and peak memory profiling (via /usr/bin/time) will be enabled for runs."
@@ -106,7 +106,7 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 
 		export MYSQL_DIR="$MYSQL_BUILDS_DIR/$BUILD/bin"
 		export SYSBENCH_SCRIPT_FILENAME="$BENCHSCRIPT"
-		#export SYSBENCH_RUN_SECONDS=10
+		#export SYSBENCH_RUN_SECONDS=5
 
 		if [ "$BENCH_USE_VTUNE" = "true" ]; then
 			VTUNE_RESULT_DIR="vtune_results/${BUILD}_${BENCHSCRIPT%.lua}"
@@ -142,6 +142,7 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 		else
 			echo "No \"time.log\", so no resident memory peak size."
 		fi
+
 	done
 done
 
