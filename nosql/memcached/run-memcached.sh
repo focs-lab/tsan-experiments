@@ -54,6 +54,38 @@ $MEMCACHED_BINARY_PATH -c 4096 -t $NTHREADS -p 7777 &
 MEMCACHED_PID=$!
 set +e
 
+# Monitor memory usage in the background and record the peak
+(
+  PEAK_RSS=0
+  # Give memcached a moment to start up before we start polling
+  sleep 1
+  # Loop as long as the memcached process is running
+  while kill -0 $MEMCACHED_PID 2>/dev/null; do
+    # Get current Resident Set Size (RSS) in KB
+    CURRENT_RSS=$(grep VmHWM /proc/$MEMCACHED_PID/status 2>/dev/null | awk '{print $2}')
+    # Check if we got a number and if it's the new peak
+    if [[ -n "$CURRENT_RSS" && "$CURRENT_RSS" -gt "$PEAK_RSS" ]]; then
+      PEAK_RSS=$CURRENT_RSS
+    fi
+    # Poll every second. A smaller interval gives more precision but uses more CPU.
+    sleep 1
+  done
+
+  # Once memcached process terminates, write the result
+  if [ "$PEAK_RSS" -gt 0 ]; then
+    mkdir -p results
+    # If the results file doesn't exist, create it with a header
+    if [ ! -f "results/memory.txt" ]; then
+      echo -e "configuration\tmemory" > results/memory.txt
+    fi
+    # Append the result for the current configuration
+    echo -e "$CONFIG_TYPE\t${PEAK_RSS}K" >> results/memory.txt
+    echo "Peak memory usage for $CONFIG_TYPE recorded: ${PEAK_RSS}K"
+  fi
+) &
+# Disown the monitoring process to let it run independently of the current shell
+disown $!
+
 # Create helper files for other scripts (e.g., run-bench.sh)
 echo "$MEMCACHED_PID" > memcached_pid
 echo "$CONFIG_TYPE" > memcached_type # Store the short config type

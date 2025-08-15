@@ -2,16 +2,18 @@
 
 # --- Argument Parsing ---
 if [ -z "$1" ]; then
-  echo "Usage: $0 <config_type> [vtune]"
+  echo "Usage: $0 <config_type> [nthreads] [vtune]"
   echo "Description: Runs the threadtest3 benchmark for a given build configuration."
   echo ""
   echo "Arguments:"
   echo "  <config_type>: The name of the configuration to run (e.g., 'orig', 'tsan-lo')."
   echo "                 This corresponds to a build directory at 'build/test-<config_type>'."
+  echo "  [nthreads]:    (Optional) Number of threads for walthread1 and walthread3 tests."
   echo "  [vtune]:       (Optional) If specified, runs the test with Intel VTune profiling."
   echo ""
   echo "Example:"
   echo "  ./run_sqlite_test.sh tsan-lo"
+  echo "  ./run_sqlite_test.sh tsan-lo 4"
   echo "  ./run_sqlite_test.sh tsan-lo vtune"
   exit 1
 fi
@@ -23,7 +25,6 @@ EXECUTABLE_PATH="$BUILD_DIR/threadtest3"
 # --- Result and Output Setup ---
 RESULTS_DIR="results"
 VTUNE_RESULTS_ROOT="vtune_results"
-RESULT_FILE="$RESULTS_DIR/${CONFIG_TYPE}.log"
 mkdir -p "$RESULTS_DIR"
 
 # --- Executable Validation ---
@@ -36,7 +37,7 @@ fi
 
 # Determine if VTune should be used
 USE_VTUNE=false
-if [[ "$2" == "vtune" ]]; then
+if [[ "$2" == "vtune" ]] || [[ "$3" == "vtune" ]]; then
     USE_VTUNE=true
     mkdir -p "$VTUNE_RESULTS_ROOT"
 fi
@@ -50,6 +51,18 @@ export TSAN_OPTIONS="report_bugs=0"
 
 # Base command to execute the test
 CMD="$EXECUTABLE_PATH"
+
+# Check if second argument is a number (thread count)
+if [[ $2 =~ ^[0-9]+$ ]]; then
+    NTHREADS=$2
+#    CMD="$CMD --w1-threads $NTHREADS --w3-threads $NTHREADS walthread1 walthread3"
+    CMD="$CMD --w1-threads $NTHREADS walthread1"
+    RESULTS_DIR=${RESULTS_DIR}/contention
+    mkdir -p "$RESULTS_DIR"
+    RESULT_FILE="$RESULTS_DIR/${CONFIG_TYPE}_${NTHREADS}threads.log"
+else
+    RESULT_FILE="$RESULTS_DIR/${CONFIG_TYPE}.log"
+fi
 
 # If VTune is enabled, wrap the command
 if [ "$USE_VTUNE" = true ]; then

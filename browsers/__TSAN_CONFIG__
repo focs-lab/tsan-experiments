@@ -1,0 +1,18 @@
+is_tsan = true
+clang_base_path = "/extra/alexey/chromium/llvm-project/build-release"
+clang_use_chrome_plugins = false
+treat_warnings_as_errors = false
+is_component_build = true
+enable_nacl = false
+is_debug = false
+symbol_level = 2
+
+cflags = [
+  "-fsanitize=thread",
+  "-mllvm", "-tsan-use-escape-analysis-global",
+  "-mllvm", "-tsan-use-lock-ownership",
+  "-mllvm", "-tsan-use-single-threaded",
+  "-mllvm", "-tsan-use-swmr",
+  "-mllvm", "-tsan-use-dominance-analysis",
+  "-fsanitize-ignorelist=$tsan_ignorelist_path",
+]

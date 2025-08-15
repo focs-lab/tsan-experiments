@@ -8,6 +8,14 @@ set -e
 BUILD_DIR="build"
 RUN_SCRIPT="./run_sqlite_test.sh"
 
+# Function to check if running in contention mode and extract thread counts
+check_contention_mode() {
+    if [ "$1" == "contention" ]; then
+        return 0
+    fi
+    return 1
+}
+
 # --- Pre-run Checks ---
 if [ ! -d "$BUILD_DIR" ]; then
     echo "Error: Build directory '$BUILD_DIR' not found."
@@ -44,11 +52,25 @@ for build_path in "${build_dirs[@]}"; do
         continue
     fi
 
-    # Run the specific test script for the configuration.
-    # "$@" passes any arguments from this script (e.g., 'vtune') to the run script.
-    if ! "$RUN_SCRIPT" "$config_name" "$@"; then
-        echo "An error occurred while running the test for '$config_name'. Aborting."
-        exit 1
+    if check_contention_mode "$@"; then
+        echo "-- Contention mode --"
+        # Contention mode - run with varying thread counts
+        min_threads=2
+        max_threads=$(nproc)
+        for threads in $(seq "$min_threads" 2 "$max_threads"); do
+            echo "Number of threads: $threads"
+            if ! "$RUN_SCRIPT" "$config_name" "$threads"; then
+                echo "An error occurred while running the test for '$config_name' with $threads threads. Aborting."
+                exit 1
+            fi
+        done
+    else
+        # Normal mode - run with default configuration
+        echo "-- Normal mode --"
+        if ! "$RUN_SCRIPT" "$config_name" "$@"; then
+            echo "An error occurred while running the test for '$config_name'. Aborting."
+            exit 1
+        fi
     fi
 done
 
