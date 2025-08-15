@@ -25,7 +25,7 @@ stats_log_file="$results_dir/instr_count.log"
 echo "Starting build for all test configurations..."
 
 # Iterate over all keys (configuration names) in CONFIG_DETAILS
-for config_name in "${!CONFIG_DETAILS[@]}"; do
+for config_name in "${!CONFIG_DETAILS[@]}" "tsan-dom-ea-lo-st-swmr"; do
     echo "----------------------------------------"
     echo "Building configuration: $config_name"
 
