@@ -14,7 +14,7 @@ if [ ! -d "sqlite-src-3500200" ]; then
 fi
 
 # Copy local threadtest.c to SQLite test folder
-cp threadtest.c sqlite-src-3500200/test/threadtest.c
+cp threadtest3.c sqlite-src-3500200/test/threadtest3.c
 
 # Create the build directory, removing the old one if it exists
 rm -rf build

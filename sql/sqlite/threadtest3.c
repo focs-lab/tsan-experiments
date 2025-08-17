@@ -78,6 +78,7 @@
 
 
 #include <sqlite3.h>
+#include <stdlib.h>
 
 #ifdef _WIN32
 # include <stdio.h>

@@ -95,7 +95,7 @@ echo "$config_name: $duration" >> "$compilation_log_file"
 
 # 2. Summarize instruction statistics and log the count
 if [ -d "/tmp/__tsan__" ]; then
-    instr_count=$(python3 ../../summarize_instr_stats.py)
+    instr_count=$(summarize_instr_stats.py)
     echo "Instrumented instructions for '$config_name': $instr_count"
     echo "$config_name: $instr_count" >> "$stats_log_file"
 else
