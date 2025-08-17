@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e # Exit immediately if a command exits with a non-zero status.
+#set -e # Exit immediately if a command exits with a non-zero status.
 
 # --- Configurable Variables ---
 FFMPEG_ARCHIVE="FFmpeg-n4.3.9.tar.gz"
