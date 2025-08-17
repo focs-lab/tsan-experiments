@@ -9,20 +9,44 @@ FFTESTVIDEO="./input/WatchingEyeTexture.mkv"
 FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
 [ -z "$FFBUILDLIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-*\")." && exit 2
 
-# Number of runs to average the results
-RUNS_COUNT=3
-
-# --- VTune Profiling Configuration (optional) ---
+# --- VTune Profiling & Trace Configuration (optional) ---
 USE_VTUNE=false
+TRACE_MODE=false
+TRACES_DIR="traces"
 VTUNE_SAMPLING_MODE="hw"
 VTUNE_ANALYSIS_TYPE="hotspots"
 
 # --- Argument Parsing ---
-if [[ "$1" == "--vtune" ]]; then
-    USE_VTUNE=true
-    echo "VTune profiling enabled."
-    shift # Consume the --vtune argument
+# This loop handles flags like --vtune and trace
+for arg in "$@"; do
+    case $arg in
+        --vtune)
+        USE_VTUNE=true
+        ;;
+        trace)
+        TRACE_MODE=true
+        ;;
+    esac
+done
+
+# Number of runs to average the results
+RUNS_COUNT=3
+if [ "$TRACE_MODE" = true ]; then
+    RUNS_COUNT=1
+    echo "Trace mode enabled. Number of runs will be 1."
+    if ! command -v zstd > /dev/null 2>&1; then
+        echo "Error: 'zstd' is not found, but is required for trace mode." >&2
+        exit 1
+    fi
+    mkdir -p "$TRACES_DIR"
+    echo "Compressed traces will be saved to '$TRACES_DIR/'."
 fi
+
+if [ "$USE_VTUNE" = true ]; then
+    RUNS_COUNT=1
+    echo "VTune profiling enabled."
+fi
+
 
 # --- Check for required tools ---
 if ! command -v /usr/bin/time > /dev/null 2>&1; then
@@ -101,11 +125,23 @@ for codec_key in "${!CODECS[@]}"; do
         for (( i=1; i<=RUNS_COUNT; i++ )); do
             echo -n "  Run $i/$RUNS_COUNT... "
             
-#            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" >/dev/null 2>&1 || {
-            /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" || {
-                echo "FAILED! This run will be skipped."
-                continue
-            }
+            if [ "$TRACE_MODE" = true ]; then
+                TRACE_FILE_ZST="$TRACES_DIR/${build}_${codec_key}.log.zst"
+                # The command is wrapped in 'bash -c' to handle the pipeline correctly.
+                # 'set -o pipefail' ensures that if ffmpeg fails, the whole command fails.
+                timed_cmd="bash -c \"set -o pipefail; $CMD_TEMPLATE 2>&1 | zstd -1 -o '$TRACE_FILE_ZST'\""
+                
+                # We need to use eval to correctly execute the command string with its internal quotes
+                /usr/bin/time -v -o "$TIME_OUTPUT_FILE" eval "$timed_cmd" || {
+                    echo "FAILED! This run will be skipped."
+                    continue
+                }
+            else
+                /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" || {
+                    echo "FAILED! This run will be skipped."
+                    continue
+                }
+            fi
             
             elapsed_raw=`grep "Elapsed (wall clock) time" "$TIME_OUTPUT_FILE" | awk '{print $NF}'`
             if [[ $elapsed_raw == *":"* ]]; then
@@ -188,4 +224,6 @@ if [ "$JQ_AVAILABLE" = true ]; then
 fi
 
 echo "Benchmark finished. CSV results are in $SUMMARY_CSV"
-
+if [ "$TRACE_MODE" = true ]; then
+    echo "Compressed traces are located in the '$TRACES_DIR/' directory."
+fi
