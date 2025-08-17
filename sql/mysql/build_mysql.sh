@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e # Exit immediately if a command exits with a non-zero status.
+#set -e # Exit immediately if a command exits with a non-zero status.
 
 # --- Configurable Variables ---
 PROJECT_SRC_ARCHIVE="mysql-8.0.39.tar.gz"
@@ -218,6 +218,7 @@ cmake -S "$PROJECT_SRC_DIR" -B "$BUILD_DIR_NAME" \
       -DWITH_LIBEVENT=bundled \
       -DWITH_UNIT_TESTS=OFF \
       -DINSTALL_MYSQLTESTDIR= \
+      -DWITH_LIBEVENT=bundled \
       $CMAKE_TSAN_OPTION \
       -DCMAKE_PREFIX_PATH="$PROJECT_SRC_DIR/downloads/usr" \
 	|| BUILD_ERRORCODE="$?"
