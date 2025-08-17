@@ -350,8 +350,8 @@ if [ "$TESTS" = true ]; then
         
         if [ "$TRACE_MODE" = true ]; then
             TRACE_FILE="$TRACES_DIR/${OPTION}.trace"
-            log "Redirecting trace output to $TRACE_FILE"
-            "redis-$OPTION/src/redis-server" redis.conf > "$TRACE_FILE" 2>&1 &
+            log "Redirecting trace output to ${TRACE_FILE}.zst"
+            "redis-$OPTION/src/redis-server" redis.conf 2>&1 | zstd -1 -o "${TRACE_FILE}.zst" &
         else
             echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
             /usr/bin/time --verbose "redis-$OPTION/src/redis-server" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
