@@ -218,7 +218,6 @@ cmake -S "$PROJECT_SRC_DIR" -B "$BUILD_DIR_NAME" \
       -DWITH_LIBEVENT=bundled \
       -DWITH_UNIT_TESTS=OFF \
       -DINSTALL_MYSQLTESTDIR= \
-      -DWITH_LIBEVENT=bundled \
       $CMAKE_TSAN_OPTION \
       -DCMAKE_PREFIX_PATH="$PROJECT_SRC_DIR/downloads/usr" \
 	|| BUILD_ERRORCODE="$?"

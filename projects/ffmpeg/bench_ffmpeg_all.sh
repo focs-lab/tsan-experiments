@@ -106,7 +106,7 @@ for codec_key in "${!CODECS[@]}"; do
         # ======================================================================
 
         export LD_LIBRARY_PATH="$build/lib/:$LD_LIBRARY_PATH"
-        CMD_TEMPLATE="$build/bin/ffmpeg -hide_banner -i \"$FFTESTVIDEO\" -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
+        CMD_TEMPLATE="$build/bin/ffmpeg -hide_banner -i $FFTESTVIDEO -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
 
         if [ "$USE_VTUNE" = true ]; then
             vtune_result_dir="vtune_results/${build}_${codec_key}"
@@ -132,7 +132,7 @@ for codec_key in "${!CODECS[@]}"; do
                 timed_cmd="bash -c \"set -o pipefail; $CMD_TEMPLATE 2>&1 | zstd -1 -o '$TRACE_FILE_ZST'\""
                 
                 # We need to use eval to correctly execute the command string with its internal quotes
-                /usr/bin/time -v -o "$TIME_OUTPUT_FILE" eval "$timed_cmd" || {
+                eval "$timed_cmd" || {
                     echo "FAILED! This run will be skipped."
                     continue
                 }
