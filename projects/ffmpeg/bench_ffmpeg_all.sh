@@ -2,13 +2,6 @@
 
 set -e
 
-# --- Configuration ---
-FFTESTVIDEO="./input/WatchingEyeTexture.mkv"
-[ ! -f "$FFTESTVIDEO" ] && echo "No video file found at $FFTESTVIDEO" && exit 1
-
-FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
-[ -z "$FFBUILDLIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-*\")." && exit 2
-
 # --- VTune Profiling & Trace Configuration (optional) ---
 USE_VTUNE=false
 TRACE_MODE=false
@@ -29,9 +22,9 @@ for arg in "$@"; do
     esac
 done
 
-# Number of runs to average the results
-RUNS_COUNT=3
+# --- Configuration based on modes ---
 if [ "$TRACE_MODE" = true ]; then
+    FFTESTVIDEO="./input/WatchingEyeTexture.for_trace.mkv"
     RUNS_COUNT=1
     echo "Trace mode enabled. Number of runs will be 1."
     if ! command -v zstd > /dev/null 2>&1; then
@@ -40,7 +33,16 @@ if [ "$TRACE_MODE" = true ]; then
     fi
     mkdir -p "$TRACES_DIR"
     echo "Compressed traces will be saved to '$TRACES_DIR/'."
+else
+    FFTESTVIDEO="./input/WatchingEyeTexture.mkv"
+    RUNS_COUNT=3
 fi
+
+[ ! -f "$FFTESTVIDEO" ] && echo "No video file found at $FFTESTVIDEO" && exit 1
+
+FFBUILDLIST_STR=$(ls -d ffmpeg-tsan* 2>/dev/null | xargs)
+[ -z "$FFBUILDLIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-*\")." && exit 2
+
 
 if [ "$USE_VTUNE" = true ]; then
     RUNS_COUNT=1
@@ -57,14 +59,16 @@ if ! command -v bc > /dev/null 2>&1; then
     echo "The 'bc' program was not found. It is required for floating-point math."
     exit 3
 fi
-if command -v jq > /dev/null 2>&1; then
-    JQ_AVAILABLE=true
-    JSON_RESULTS_FILE=$(mktemp)
-    SUMMARY_JSON="summary_ffmpeg_benchmark.json"
-    echo "jq found, will generate JSON output to $SUMMARY_JSON."
-else
-    JQ_AVAILABLE=false
-    echo "jq not found, will generate CSV output only."
+JQ_AVAILABLE=false
+if [ "$TRACE_MODE" = false ]; then
+    if command -v jq > /dev/null 2>&1; then
+        JQ_AVAILABLE=true
+        JSON_RESULTS_FILE=$(mktemp)
+        SUMMARY_JSON="summary_ffmpeg_benchmark.json"
+        echo "jq found, will generate JSON output to $SUMMARY_JSON."
+    else
+        echo "jq not found, will generate CSV output only."
+    fi
 fi
 
 # --- Codec Definitions ---
@@ -132,34 +136,42 @@ for codec_key in "${!CODECS[@]}"; do
                 timed_cmd="bash -c \"set -o pipefail; $CMD_TEMPLATE 2>&1 | zstd -1 -o '$TRACE_FILE_ZST'\""
                 
                 # We need to use eval to correctly execute the command string with its internal quotes
-                eval "$timed_cmd" || {
+                if eval "$timed_cmd"; then
+                    echo "OK (Trace saved to $TRACE_FILE_ZST)"
+                else
                     echo "FAILED! This run will be skipped."
                     continue
-                }
+                fi
             else
                 /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" || {
                     echo "FAILED! This run will be skipped."
                     continue
                 }
+            
+                elapsed_raw=`grep "Elapsed (wall clock) time" "$TIME_OUTPUT_FILE" | awk '{print $NF}'`
+                if [[ $elapsed_raw == *":"* ]]; then
+                    elapsed_s=`echo "$elapsed_raw" | awk -F: '{ secs=0; for(i=1;i<=NF;i++) secs = secs*60 + $i; print secs }'`
+                else
+                    elapsed_s=$elapsed_raw
+                fi
+                user_s=$(grep "User time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                system_s=$(grep "System time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                max_mem=$(grep "Maximum resident set size" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                
+                echo "OK (Time: ${elapsed_s}s, Mem: ${max_mem}KB)"
+                
+                elapsed_times+=("$elapsed_s")
+                user_times+=("$user_s")
+                system_times+=("$system_s")
+                mem_usages+=("$max_mem")
             fi
-            
-            elapsed_raw=`grep "Elapsed (wall clock) time" "$TIME_OUTPUT_FILE" | awk '{print $NF}'`
-            if [[ $elapsed_raw == *":"* ]]; then
-                elapsed_s=`echo "$elapsed_raw" | awk -F: '{ secs=0; for(i=1;i<=NF;i++) secs = secs*60 + $i; print secs }'`
-            else
-                elapsed_s=$elapsed_raw
-            fi
-            user_s=$(grep "User time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
-            system_s=$(grep "System time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
-            max_mem=$(grep "Maximum resident set size" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
-            
-            echo "OK (Time: ${elapsed_s}s, Mem: ${max_mem}KB)"
-            
-            elapsed_times+=("$elapsed_s")
-            user_times+=("$user_s")
-            system_times+=("$system_s")
-            mem_usages+=("$max_mem")
         done
+
+        if [ "$TRACE_MODE" = true ]; then
+             echo "--------------------------------------------------------"
+             echo ""
+             continue
+        fi
 
         successful_runs=${#elapsed_times[@]}
         if [ "$successful_runs" -eq 0 ]; then
