@@ -351,9 +351,12 @@ if [ "$TESTS" = true ]; then
     fi
 
     # --- Benchmark Loop ---
+    BENCH_RESULTS_FILE="$RESULTS_DIR/results.txt"
+    > "$BENCH_RESULTS_FILE"
     for OPTION in $BUILD_OPTIONS
     do
         log "Testing $OPTION"
+        echo "==> Testing $OPTION" >> "$BENCH_RESULTS_FILE"
         mkdir -p "$RESULTS_DIR/benchmarks"
         
         if [ "$TRACE_MODE" = true ]; then
@@ -370,26 +373,26 @@ if [ "$TESTS" = true ]; then
         # For 'orig' build, append "0" to request count, effectively multiplying it by 10.
         [[ "$OPTION" = "orig" ]] && L="0" || L=""
         
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_INLINE "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" PING_MBULK  "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SET         "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" GET         "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" INCR        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPUSH       "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPOP        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" RPOP        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SADD        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" HSET        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" SPOP        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZADD        "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" ZPOPMIN     "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LPUSH       "${REQ_GENERAL}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_100  "${REQ_LRANGE100}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_300  "${REQ_LRANGE300}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_500  "${REQ_LRANGE500}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" LRANGE_600  "${REQ_LRANGE600}${L}"
-        run "$RESULTS_DIR/benchmarks/$OPTION.txt" MSET        "${REQ_MSET}${L}"
+        run "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" SADD        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" HSET        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_GENERAL}${L}"
+        run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}"
+        run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}"
+        run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}"
+        run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}"
+        run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}"
         
         killall -9 redis-server
         sleep 5
