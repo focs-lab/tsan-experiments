@@ -2,11 +2,11 @@ source callmysql-export-main-vars.sh || exit $?
 
 ./server-check-connection.sh && echo "Already launched." && exit 1
 
-
 # Base command
 declare -a mysql_cmd=(
     "$MYSQL_DIR/mysqld"
     "--datadir=$MYSQL_DATA_DIR"
+    "--port=7777"
 )
 
 # VTune run:

@@ -2,43 +2,53 @@
 
 set -e
 
-# --- Configuration ---
-FF_TEST_VIDEO="./input/WatchingEyeTexture.mkv"
-[ ! -f "$FF_TEST_VIDEO" ] && echo "No video file found at $FF_TEST_VIDEO" && exit 1
+# --- VTune Profiling & Trace Configuration (optional) ---
+USE_VTUNE=false
+TRACE_MODE=false
+TRACES_DIR="traces"
+VTUNE_SAMPLING_MODE="hw"
+VTUNE_ANALYSIS_TYPE="hotspots"
+
+# --- Argument Parsing ---
+# This loop handles flags like --vtune and trace
+for arg in "$@"; do
+    case $arg in
+        --vtune)
+        USE_VTUNE=true
+        ;;
+        trace)
+        TRACE_MODE=true
+        ;;
+    esac
+done
+
+# --- Configuration based on modes ---
+if [ "$TRACE_MODE" = true ]; then
+    FFTESTVIDEO="./input/WatchingEyeTexture.for_trace.mkv"
+    RUNS_COUNT=1
+    echo "Trace mode enabled. Number of runs will be 1."
+    if ! command -v zstd > /dev/null 2>&1; then
+        echo "Error: 'zstd' is not found, but is required for trace mode." >&2
+        exit 1
+    fi
+    mkdir -p "$TRACES_DIR"
+    echo "Compressed traces will be saved to '$TRACES_DIR/'."
+else
+    FFTESTVIDEO="./input/WatchingEyeTexture.mkv"
+    RUNS_COUNT=3
+fi
+
+[ ! -f "$FFTESTVIDEO" ] && echo "No video file found at $FFTESTVIDEO" && exit 1
 
 FF_BUILD_LIST_STR=$(ls -d ffmpeg-orig ffmpeg-tsan* 2>/dev/null | xargs)
 [ -z "$FF_BUILD_LIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-tsan* ffmpeg-orig\")." && exit 2
 
-#FF_BUILD_LIST_STR="ffmpeg-tsan-dom"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
 
-# Number of runs to average the results (force set to 1 with `--trace`):
-RUNS_COUNT=3
+if [ "$USE_VTUNE" = true ]; then
+    RUNS_COUNT=1
+    echo "VTune profiling enabled."
+fi
 
-[ -z "$FFMPEG_BENCH_NPROC_COUNT" ] && FFMPEG_BENCH_NPROC_COUNT="$(nproc)"
-
-# --- Profiling Configuration (optional) ---
-USE_VTUNE=false
-VTUNE_SAMPLING_MODE="hw"
-VTUNE_ANALYSIS_TYPE="hotspots"
-TRACE_MODE=false
-
-# --- Argument Parsing ---
-for ARG in "$@"
-do
-	case $ARG in
-		--vtune)
-		USE_VTUNE=true
-		echo "VTune profiling enabled."
-		shift
-		;;
-		--trace)
-		TRACE_MODE=true
-		RUNS_COUNT=1
-		echo "Trace mode enabled. Run count forced to 1."
-		shift
-		;;
-	esac
-done
 
 # --- Check for required tools ---
 if ! command -v /usr/bin/time > /dev/null 2>&1; then
@@ -53,14 +63,16 @@ if [ "$TRACE_MODE" = "true" ] && ! command -v zstd > /dev/null 2>&1; then
 	echo "The 'zstd' program was not found. It is required for `--trace` stderr handling."
 	exit 3
 fi
-if command -v jq > /dev/null 2>&1; then
-	JQ_AVAILABLE=true
-	JSON_RESULTS_FILE=$(mktemp)
-	SUMMARY_JSON="summary_ffmpeg_benchmark.json"
-	echo "jq found, will generate JSON output to $SUMMARY_JSON."
-else
-	JQ_AVAILABLE=false
-	echo "jq not found, will generate CSV output only."
+JQ_AVAILABLE=false
+if [ "$TRACE_MODE" = false ]; then
+    if command -v jq > /dev/null 2>&1; then
+        JQ_AVAILABLE=true
+        JSON_RESULTS_FILE=$(mktemp)
+        SUMMARY_JSON="summary_ffmpeg_benchmark.json"
+        echo "jq found, will generate JSON output to $SUMMARY_JSON."
+    else
+        echo "jq not found, will generate CSV output only."
+    fi
 fi
 
 # --- Codec Definitions ---
@@ -92,10 +104,8 @@ for CODEC_KEY in "${!CODECS[@]}"; do
 	for BUILD in "${FF_BUILD_ARRAY[@]}"; do
 		echo "--- Benchmarking: Codec [$CODEC_KEY], Build [$BUILD] ---"
 
-		ELAPSED_TIMES=()
-		USER_TIMES=()
-		SYSTEM_TIMES=()
-		MEM_USAGES=()
+        export LD_LIBRARY_PATH="$build/lib/:$LD_LIBRARY_PATH"
+        CMD_TEMPLATE="$build/bin/ffmpeg -hide_banner -i $FFTESTVIDEO -threads $(nproc) -y $encoding_params -loglevel error /dev/shm/out.$output_ext"
 
 		export LD_LIBRARY_PATH="$BUILD/lib/:$LD_LIBRARY_PATH"
 		CMD_TEMPLATE="$BUILD/bin/ffmpeg -hide_banner -i \"$FF_TEST_VIDEO\" -threads $FFMPEG_BENCH_NPROC_COUNT -y $ENCODING_PARAMS -loglevel error /dev/shm/out.$OUTPUT_EXT"
@@ -109,11 +119,60 @@ for CODEC_KEY in "${!CODECS[@]}"; do
 				-knob enable-stack-collection=true \
 				-data-limit=5000"
 
-			CMD_TEMPLATE="vtune $VTUNE_OPTIONS -- $CMD_TEMPLATE"
-			echo "  VTune enabled. Results will be in: $VTUNE_RESULT_DIR"
-		fi
+        for (( i=1; i<=RUNS_COUNT; i++ )); do
+            echo -n "  Run $i/$RUNS_COUNT... "
+            
+            if [ "$TRACE_MODE" = true ]; then
+                TRACE_FILE_ZST="$TRACES_DIR/${build}_${codec_key}.log.zst"
+                # The command is wrapped in 'bash -c' to handle the pipeline correctly.
+                # 'set -o pipefail' ensures that if ffmpeg fails, the whole command fails.
+                timed_cmd="bash -c \"set -o pipefail; $CMD_TEMPLATE 2>&1 | zstd -1 -o '$TRACE_FILE_ZST'\""
+                
+                # We need to use eval to correctly execute the command string with its internal quotes
+                if eval "$timed_cmd"; then
+                    echo "OK (Trace saved to $TRACE_FILE_ZST)"
+                else
+                    echo "FAILED! This run will be skipped."
+                    continue
+                fi
+            else
+                /usr/bin/time -v -o "$TIME_OUTPUT_FILE" bash -c "$CMD_TEMPLATE" || {
+                    echo "FAILED! This run will be skipped."
+                    continue
+                }
+            
+                elapsed_raw=`grep "Elapsed (wall clock) time" "$TIME_OUTPUT_FILE" | awk '{print $NF}'`
+                if [[ $elapsed_raw == *":"* ]]; then
+                    elapsed_s=`echo "$elapsed_raw" | awk -F: '{ secs=0; for(i=1;i<=NF;i++) secs = secs*60 + $i; print secs }'`
+                else
+                    elapsed_s=$elapsed_raw
+                fi
+                user_s=$(grep "User time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                system_s=$(grep "System time (seconds)" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                max_mem=$(grep "Maximum resident set size" "$TIME_OUTPUT_FILE" | awk '{print $NF}')
+                
+                echo "OK (Time: ${elapsed_s}s, Mem: ${max_mem}KB)"
+                
+                elapsed_times+=("$elapsed_s")
+                user_times+=("$user_s")
+                system_times+=("$system_s")
+                mem_usages+=("$max_mem")
+            fi
+        done
 
-		echo -e "\n\e[96;1m$CMD_TEMPLATE\e[0m\n"
+        if [ "$TRACE_MODE" = true ]; then
+             echo "--------------------------------------------------------"
+             echo ""
+             continue
+        fi
+
+        successful_runs=${#elapsed_times[@]}
+        if [ "$successful_runs" -eq 0 ]; then
+            echo "  No successful runs for this configuration. Skipping."
+            echo "--------------------------------------------------------"
+            echo ""
+            continue
+        fi
 
 		for (( i=1; i<=RUNS_COUNT; i++ )); do
 			echo -n "  Run $i/$RUNS_COUNT... "
@@ -216,3 +275,6 @@ if [ "$JQ_AVAILABLE" = true ]; then
 fi
 
 echo "Benchmark finished. CSV results are in $SUMMARY_CSV"
+if [ "$TRACE_MODE" = true ]; then
+    echo "Compressed traces are located in the '$TRACES_DIR/' directory."
+fi
