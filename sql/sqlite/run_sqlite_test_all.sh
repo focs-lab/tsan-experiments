@@ -8,13 +8,16 @@ set -e
 BUILD_DIR="build"
 RUN_SCRIPT="./run_sqlite_test.sh"
 
-# Function to check if running in contention mode and extract thread counts
-check_contention_mode() {
-    if [ "$1" == "contention" ]; then
-        return 0
+# Argument parsing to separate 'contention' from other arguments to be forwarded
+is_contention=false
+forward_args=()
+for arg in "$@"; do
+    if [ "$arg" == "contention" ]; then
+        is_contention=true
+    else
+        forward_args+=("$arg")
     fi
-    return 1
-}
+done
 
 # --- Pre-run Checks ---
 if [ ! -d "$BUILD_DIR" ]; then
@@ -39,7 +42,7 @@ if [ ${#build_dirs[@]} -eq 0 ]; then
 fi
 
 echo "Found ${#build_dirs[@]} compiled configurations. Starting tests..."
-echo "Any arguments passed to this script (like 'vtune') will be forwarded to the test runner."
+echo "Any arguments passed to this script (like 'vtune' or 'trace') will be forwarded to the test runner."
 echo ""
 
 # --- Test Execution Loop ---
@@ -52,14 +55,14 @@ for build_path in "${build_dirs[@]}"; do
         continue
     fi
 
-    if check_contention_mode "$@"; then
+    if [ "$is_contention" = true ]; then
         echo "-- Contention mode --"
         # Contention mode - run with varying thread counts
         min_threads=2
         max_threads=$(nproc)
         for threads in $(seq "$min_threads" 2 "$max_threads"); do
             echo "Number of threads: $threads"
-            if ! "$RUN_SCRIPT" "$config_name" "$threads"; then
+            if ! "$RUN_SCRIPT" "$config_name" "$threads" "${forward_args[@]}"; then
                 echo "An error occurred while running the test for '$config_name' with $threads threads. Aborting."
                 exit 1
             fi
@@ -67,7 +70,7 @@ for build_path in "${build_dirs[@]}"; do
     else
         # Normal mode - run with default configuration
         echo "-- Normal mode --"
-        if ! "$RUN_SCRIPT" "$config_name" "$@"; then
+        if ! "$RUN_SCRIPT" "$config_name" "${forward_args[@]}"; then
             echo "An error occurred while running the test for '$config_name'. Aborting."
             exit 1
         fi

@@ -34,13 +34,19 @@ do
     # The result (in kilobytes) will be saved to $MEMORY_LOG
     TIME_CMD="/usr/bin/time -o $MEMORY_LOG -f %M"
 
+    RUNNER=""
+    if [ -z "$DISPLAY" ]; then
+      RUNNER="xvfb-run"
+    fi
+
     if [ "$BUILD" = "chrome-orig" ]; then
       # Run for the native build
-      $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS
+      $RUNNER $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS \
+        --extra-browser-args="--no-sandbox --disable-gpu"
     else
       # Run for TSan builds with extra options
       TSAN_OPTIONS="atexit_sleep_ms=200 flush_memory_ms=2000" \
-      $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS \
+      $RUNNER $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS \
         --extra-browser-args="--no-sandbox --disable-gpu"
     fi
 

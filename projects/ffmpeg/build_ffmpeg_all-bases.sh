@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e
+#set -e
 
 # --- Variables ---
 RESULTS_DIR="results_ffmpeg"

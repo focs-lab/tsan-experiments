@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -e # Exit immediately if a command exits with a non-zero status.
+#set -e # Exit immediately if a command exits with a non-zero status.
 
 # --- Configurable Variables ---
 PROJECT_SRC_ARCHIVE="mysql-8.0.39.tar.gz"

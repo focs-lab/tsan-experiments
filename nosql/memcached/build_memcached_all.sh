@@ -8,8 +8,15 @@ RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
 STATS_FILE="$RESULTS_DIR/instr_count.log"
 TSAN_TMP_DIR="/tmp/__tsan__"
 
+COUNT_INSTRUCTIONS=false
+if [[ "$1" == "--instr-count" ]]; then
+    COUNT_INSTRUCTIONS=true
+fi
+
 mkdir -p $RESULTS_DIR
-> $STATS_FILE
+if [ "$COUNT_INSTRUCTIONS" = true ]; then
+    > $STATS_FILE
+fi
 
 # --- Functions ---
 
@@ -80,11 +87,13 @@ for config_name in "${!CONFIG_DETAILS[@]}"; do
     log "Result for '$config_name' saved to $RESULTS_FILE"
 
     # 6. Summarize and save instruction stats for the current config
-    log "Summarizing instruction statistics for $config_name"
-    instr_count=$(summarize_instr_stats.py)
-    log "Instrumented instructions: $instr_count"
-    echo "$config_name: $instr_count" >> "$STATS_FILE"
-    log "Result for '$config_name' saved to $STATS_FILE"
+    if [ "$COUNT_INSTRUCTIONS" = true ]; then
+        log "Summarizing instruction statistics for $config_name"
+        instr_count=$(summarize_instr_stats.py)
+        log "Instrumented instructions: $instr_count"
+        echo "$config_name: $instr_count" >> "$STATS_FILE"
+        log "Result for '$config_name' saved to $STATS_FILE"
+    fi
     echo "----------------------------------------"
 done
 
