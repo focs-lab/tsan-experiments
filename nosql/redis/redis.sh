@@ -52,6 +52,7 @@ BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
 COMPILE=true
 TESTS=true
 TRACE_MODE=false
+COUNT_INSTRUCTIONS=false
 
 usage() {
     echo "Usage: $0 [ --compile-only | --test-only | trace | --help ]"
@@ -89,6 +90,9 @@ for arg in "$@"; do
             ;;
         trace)
             TRACE_MODE=true
+            ;;
+        --instr-count)
+            COUNT_INSTRUCTIONS=true
             ;;
     esac
 done
@@ -231,8 +235,10 @@ if [ "$COMPILE" = true ]; then
     echo "Compilation time (in seconds):" > "$RESULTS_FILE"
     log "Results file '$RESULTS_FILE' has been cleared."
     # Clear/create stats file
-    echo "Instrumented instruction count:" > "$STATS_FILE"
-    log "Stats file '$STATS_FILE' has been cleared."
+    if [ "$COUNT_INSTRUCTIONS" = true ]; then
+        echo "Instrumented instruction count:" > "$STATS_FILE"
+        log "Stats file '$STATS_FILE' has been cleared."
+    fi
     echo ""
 
     # Build loop
@@ -288,11 +294,13 @@ if [ "$COMPILE" = true ]; then
         log "Result for '$OPTION' saved to $RESULTS_FILE"
 
         # Summarize and save instruction stats
-        log "Summarizing instruction statistics for $OPTION"
-        instr_count=$(summarize_instr_stats.py)
-        log "Instrumented instructions: $instr_count"
-        echo "$OPTION: $instr_count" >> "../../$STATS_FILE"
-        log "Result for '$OPTION' saved to $STATS_FILE"
+        if [ "$COUNT_INSTRUCTIONS" = true ]; then
+            log "Summarizing instruction statistics for $OPTION"
+            instr_count=$(summarize_instr_stats.py)
+            log "Instrumented instructions: $instr_count"
+            echo "$OPTION: $instr_count" >> "../../$STATS_FILE"
+            log "Result for '$OPTION' saved to $STATS_FILE"
+        fi
 
         cd ../..
         log "----------------------------------------"
