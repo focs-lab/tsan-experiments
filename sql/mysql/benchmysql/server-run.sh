@@ -9,12 +9,6 @@ declare -a mysql_cmd=(
     "--datadir=$MYSQL_DATA_DIR"
 )
 
-# Base command
-declare -a mysql_cmd=(
-    "$MYSQL_DIR/mysqld"
-    "--datadir=$MYSQL_DATA_DIR"
-)
-
 # VTune run:
 if [ "$BENCH_USE_VTUNE" = "true" ]; then
     echo -e "\n  \e[94mVTune profiling is enabled.\e[m\n"
