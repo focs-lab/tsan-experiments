@@ -47,8 +47,12 @@ if [ ${#CONFIG_DETAILS[@]} -eq 0 ]; then
 fi
 
 # List of configurations to build
-BUILDTYPELIST="orig tsan tsan-dom tsan-ea tsan-lo tsan-st tsan-swmr tsan-dom-ea-lo-st-swmr"
+#BUILDTYPELIST="orig  tsan  tsan-dom  tsan-ea  tsan-lo  tsan-loub  tsan-st  tsan-swmr  tsan-dom-ea-lo-st-swmr"
+BUILDTYPELIST="${!CONFIG_DETAILS[@]} tsan-dom-ea-lo-st-swmr"
 BUILDTYPELIST="$(echo $BUILDTYPELIST | xargs)"
+
+#echo $BUILDTYPELIST; exit
+
 
 # 2. Create results directory and clear/create the results files
 log "Creating results directory: $RESULTS_DIR"
@@ -87,12 +91,14 @@ for config_name in $BUILDTYPELIST; do
 	log "Result for '$config_name' saved to $RESULTS_FILE"
 
 	# 6. Summarize and save instruction stats
+	: '
 	log "Summarizing instruction statistics for $config_name"
 	instr_count=$(summarize_instr_stats.py)
 	log "Instrumented instructions: $instr_count"
 	echo "$config_name: $instr_count" >> "$STATS_FILE"
-	log "Result for '$config_name' saved to $STATS_FILE"
+	log "Result for \"$config_name\" saved to $STATS_FILE"
 	log "----------------------------------------"
+	'
 done
 
 log "Building all FFmpeg configurations completed. All results are in $RESULTS_DIR."
