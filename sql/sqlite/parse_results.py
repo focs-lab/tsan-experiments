@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import os
 import re
 from collections import defaultdict
@@ -120,7 +122,7 @@ def generate_comparison_tables(all_data):
                     # For all other tests, higher ops is better.
                     if val > 0:
                         slowdown = baseline_val / val
-                        cell_str = f"{int(val):,} ({slowdown:.2f}x slowdown)"
+                        cell_str = f"{int(val):,} ({slowdown:.2f}x)"
                     else:
                         cell_str = f"{int(val):,}"
                 row.append(f"{cell_str:<28}")
@@ -164,7 +166,7 @@ def generate_comparison_tables(all_data):
                     # For other tests, higher ops is better.
                     if tsan_baseline_val > 0:
                         speedup = val / tsan_baseline_val
-                        cell_str = f"{int(val):,} ({speedup:.2f}x speedup)"
+                        cell_str = f"{int(val):,} ({speedup:.2f}x)"
                     else:
                         cell_str = f"{int(val):,}"
 
@@ -210,7 +212,7 @@ def generate_contention_tables(contention_data):
                 cell_str = "N/A"
                 if val is not None and baseline_val is not None and val > 0:
                     slowdown = baseline_val / val
-                    cell_str = f"{int(val):,} ({slowdown:.2f}x slowdown)"
+                    cell_str = f"{int(val):,} ({slowdown:.2f}x)"
                 elif val is not None:
                     cell_str = f"{int(val):,}"
                 row.append(f"{cell_str:<25}")
@@ -245,7 +247,7 @@ def generate_contention_tables(contention_data):
 
                 if val is not None and tsan_baseline_val is not None and tsan_baseline_val > 0:
                     speedup = val / tsan_baseline_val
-                    cell_str = f"{int(val):,} ({speedup:.2f}x speedup)"
+                    cell_str = f"{int(val):,} ({speedup:.2f}x)"
                 elif val is not None:
                     cell_str = f"{int(val):,}"
 
