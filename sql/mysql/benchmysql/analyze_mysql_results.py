@@ -74,12 +74,21 @@ def process_and_print_summary(filepath):
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
-            # Store data in a dictionary keyed by the build name
+            # Find the correct column name for total operations, which might vary.
+            # We check for 'Total ops' first, then fall back to 'Total'.
+            # This is done by peeking at the header.
+            header = [h.strip() for h in reader.fieldnames]
+            total_col_name = 'Total ops' if 'Total ops' in header else 'Total'
+
+            # Go back to the start to read the data rows
+            f.seek(0)
+            next(reader) # Skip header row
+
             data = {row['MySQL build'].strip(): {
-                        'Total': float(row['Total'].strip()),
+                        'Total': float(row[total_col_name].strip()),
                         'Memory peak (kb)': float(row['Memory peak (kb)'].strip())
-                    } for row in reader if row}
-    except (IOError, ValueError, KeyError) as e:
+                    } for row in reader if row and row.get('MySQL build')}
+    except (IOError, ValueError, KeyError, StopIteration) as e:
         print(f"Error processing summary data: {e}", file=sys.stderr)
         return
 
@@ -95,32 +104,46 @@ def process_and_print_summary(filepath):
         
     orig_total = orig_data['Total']
     tsan_total = tsan_data['Total']
+    orig_mem = orig_data['Memory peak (kb)']
+    tsan_mem = tsan_data['Memory peak (kb)']
 
     # Prepare data for the new summary table
-    summary_header = ['Configuration', 'Total ops', 'Memory peak (kb)', 'Slowdown (SD)', 'Speedup (SU)']
+    summary_header = ['Configuration', 'Total ops', 'SD (Perf)', 'SU (Perf)', 'SD (Mem)', 'SU (Mem)']
     summary_rows = []
 
     for name, values in sorted(data.items()):
         total_ops = values['Total']
         memory = values['Memory peak (kb)']
 
-        # Calculate Slowdown (SD) vs. 'orig'
-        sd_str = f"{orig_total / total_ops:.2f}x" if total_ops > 0 else "N/A"
-
-        # Calculate Speedup (SU) vs. 'tsan'
+        # --- Performance Metrics (Higher is better) ---
+        sd_perf_str = f"{(orig_total / total_ops):.2f}x" if total_ops > 0 else "N/A"
         if name == 'orig':
-            su_str = "N/A"  # SU is not applicable for 'orig'
-        elif tsan_total > 0:
-            su_str = f"{total_ops / tsan_total:.2f}x"
+            su_perf_str = "N/A"
         else:
-            su_str = "N/A"
+            su_perf_str = f"{(total_ops / tsan_total):.2f}x" if tsan_total > 0 else "N/A"
             
+        # --- Memory Metrics (Lower is better) ---
+        # SD (Mem) = Overhead vs. 'orig'. Calculated as Mem_Config / Mem_Orig.
+        if orig_mem > 0:
+            sd_mem_str = f"{(memory / orig_mem):.2f}x"
+        else:
+            sd_mem_str = "1.00x" if memory == 0 else "Inf"
+        
+        # SU (Mem) = Reduction vs. 'tsan'. Calculated as Mem_TSan / Mem_Config.
+        if name == 'orig':
+            su_mem_str = "N/A"
+        elif memory > 0:
+            su_mem_str = f"{(tsan_mem / memory):.2f}x"
+        else:
+            su_mem_str = "1.00x" if tsan_mem == 0 else "Inf"
+
         summary_rows.append([
             name,
             f"{total_ops:.2f}",
-            f"{memory:.0f}",
-            sd_str,
-            su_str
+            sd_perf_str,
+            su_perf_str,
+            sd_mem_str,
+            su_mem_str
         ])
     
     # Print the new table using the existing pretty-print function
