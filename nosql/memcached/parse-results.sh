@@ -3,6 +3,7 @@
 # --- Configuration ---
 RESULTS_DIR="results" # По умолчанию текущая директория, можно изменить на "results"
 BASELINE_FILENAME_PATTERN="tsan_results.txt" # Имя файла базовых результатов
+NATIVE_FILENAME_PATTERN="orig_results.txt" # Имя файла для нативного запуска (для расчета SD)
 RESULT_FILE_PATTERN="*_results.txt" # Шаблон для поиска всех файлов результатов
 
 METRIC_SECTION_START_MARKER="AGGREGATED AVERAGE RESULTS"
@@ -41,6 +42,19 @@ elif [ -n "$1" ]; then
     echo "Warning: Argument '$1' is not a directory. Analyzing results in '$target_dir'."
 fi
 
+# Ищем нативный файл для расчета SD
+native_file_path=$(find "$target_dir" -maxdepth 1 -name "$NATIVE_FILENAME_PATTERN" -print -quit)
+if [ -z "$native_file_path" ] || [ ! -f "$native_file_path" ]; then
+    echo "Error: Native results file '$NATIVE_FILENAME_PATTERN' not found in '$target_dir'." >&2
+    exit 1
+fi
+echo "Using native file for SD calculation: $native_file_path"
+read -r _ NATIVE_AVG_LATENCY <<< "$(extract_metrics "$native_file_path")"
+if [ "$NATIVE_AVG_LATENCY" == "N/A" ] || ! (( $(echo "$NATIVE_AVG_LATENCY > 0" | bc -l) )); then
+    echo "Error: Could not extract valid native latency from '$native_file_path'. Exiting." >&2
+    exit 1
+fi
+
 # Ищем базовый файл
 baseline_file_path=$(find "$target_dir" -maxdepth 1 -name "$BASELINE_FILENAME_PATTERN" -print -quit)
 
@@ -57,21 +71,24 @@ if [ "$BASELINE_OPS_SEC" == "N/A" ]; then
     exit 1
 fi
 
-printf "%-35s | %-15s | %-10s | %-15s | %-15s\n" "Configuration (from file)" "Totals Ops/sec" "Speedup" "Avg. Latency" "Latency Improv."
-printf "%-35s-+-%-15s-+-%-10s-+-%-15s-+-%-15s\n" "-----------------------------------" "---------------" "----------" "---------------" "---------------"
+printf "%-35s | %-15s | %-10s | %-10s | %-15s | %-15s\n" "Configuration (from file)" "Totals Ops/sec" "Speedup" "SD" "Avg. Latency" "Latency Improv."
+printf "%-35s-+-%-15s-+-%-10s-+-%-10s-+-%-15s-+-%-15s\n" "-----------------------------------" "---------------" "----------" "----------" "---------------" "---------------"
 
-printf "%-35s | %15.2f | %10s | %15.3f | %15s\n" \
+sd_baseline=$(echo "scale=2; $BASELINE_AVG_LATENCY / $NATIVE_AVG_LATENCY" | bc -l)
+
+printf "%-35s | %15.2f | %10s | %9.2fx | %15.3f | %15s\n" \
     "Baseline ($(basename "$baseline_file_path"))" \
     "$BASELINE_OPS_SEC" \
     "1.00x" \
+    "$sd_baseline" \
     "$BASELINE_AVG_LATENCY" \
     "1.00x"
 
 # Ищем все файлы результатов в указанной директории
 # Используем find для поиска файлов, затем цикл while read для обработки
 find "$target_dir" -maxdepth 1 -name "$RESULT_FILE_PATTERN" -print0 | while IFS= read -r -d $'\0' result_file; do
-    # Пропускаем сам базовый файл, если он попадется в общем списке
-    if [ "$result_file" == "$baseline_file_path" ]; then
+    # Пропускаем сам базовый файл и нативный файл
+    if [ "$result_file" == "$baseline_file_path" ] || [ "$result_file" == "$native_file_path" ]; then
         continue
     fi
 
@@ -89,14 +106,17 @@ find "$target_dir" -maxdepth 1 -name "$RESULT_FILE_PATTERN" -print0 | while IFS=
     ops_speedup=$(echo "scale=2; $current_ops_sec / $BASELINE_OPS_SEC" | bc -l)
 
     latency_improvement="N/A"
+    sd="N/A"
     if (( $(echo "$current_avg_latency > 0" | bc -l) )); then
         latency_improvement=$(echo "scale=2; $BASELINE_AVG_LATENCY / $current_avg_latency" | bc -l)
+        sd=$(echo "scale=2; $current_avg_latency / $NATIVE_AVG_LATENCY" | bc -l)
     fi
 
-    printf "%-35s | %15.2f | %9.2fx | %15.3f | %14.2fx\n" \
+    printf "%-35s | %15.2f | %9.2fx | %9.2fx | %15.3f | %14.2fx\n" \
         "$config_name" \
         "$current_ops_sec" \
         "$ops_speedup" \
+        "$sd" \
         "$current_avg_latency" \
         "$latency_improvement"
 done
@@ -104,3 +124,4 @@ done
 echo "-------------------------------------------------------------------------------------------------------------"
 echo "Ops/sec Speedup: Higher is better (relative to baseline)."
 echo "Latency Improvement: Higher is better (lower latency relative to baseline results in a higher ratio)."
+echo "SD (Slowdown vs. Native): Lower is better. How many times slower the program runs compared to native."
