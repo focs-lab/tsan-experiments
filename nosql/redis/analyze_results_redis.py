@@ -3,6 +3,7 @@
 import sys
 from collections import defaultdict
 import os
+import math
 
 def parse_results(filepath):
     """
@@ -66,6 +67,10 @@ def calculate_and_print_metrics(data):
     print(header)
     print("-" * len(header))
 
+    # To store values for geometric mean calculation
+    geomean_slowdowns = defaultdict(list)
+    geomean_speedups = defaultdict(list)
+
     # Print table rows for each benchmark
     for bench_name in all_benchmarks:
         row_str = f"{bench_name:<15}"
@@ -84,6 +89,7 @@ def calculate_and_print_metrics(data):
                 if native_value and bench_value > 0:
                     slowdown = native_value / bench_value
                     sd_str = f"SD:{slowdown:>6.2f}x"
+                    geomean_slowdowns[config].append(slowdown)
                 else:
                     sd_str = f"SD:{'N/A':>7}"
 
@@ -91,6 +97,7 @@ def calculate_and_print_metrics(data):
                 if config != 'tsan' and tsan_value and bench_value > 0:
                     speedup = bench_value / tsan_value
                     su_str = f"SU:{speedup:>6.2f}x"
+                    geomean_speedups[config].append(speedup)
                 else:
                     # For 'tsan', speedup is not calculated (it's the baseline)
                     su_str = f"SU:{'----':>7}"
@@ -99,6 +106,33 @@ def calculate_and_print_metrics(data):
 
             row_str += f" | {cell_str:<20}"
         print(row_str)
+
+    # --- Print summary row with Geometric Mean ---
+    print("-" * len(header))
+    summary_row_str = f"{'Geomean':<15}"
+    for config in configs:
+        # Calculate Geomean SD
+        slowdowns = geomean_slowdowns[config]
+        if slowdowns:
+            # Use logs for numerical stability: exp(sum(log(x_i))/n)
+            log_sum_sd = sum(math.log(s) for s in slowdowns)
+            geomean_sd = math.exp(log_sum_sd / len(slowdowns))
+            sd_str = f"SD:{geomean_sd:>6.2f}x"
+        else:
+            sd_str = f"SD:{'N/A':>7}"
+
+        # Calculate Geomean SU
+        speedups = geomean_speedups[config]
+        if speedups:
+            log_sum_su = sum(math.log(s) for s in speedups)
+            geomean_su = math.exp(log_sum_su / len(speedups))
+            su_str = f"SU:{geomean_su:>6.2f}x"
+        else:
+            su_str = f"SU:{'----':>7}"
+
+        cell_str = f"{sd_str} {su_str}"
+        summary_row_str += f" | {cell_str:<20}"
+    print(summary_row_str)
 
 
 def main():
