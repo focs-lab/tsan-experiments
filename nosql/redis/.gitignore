@@ -1,2 +1,5 @@
 redis-7.0.15/
 __results_redis__/*
+*.txt
+results*/*
+*.tar.gz
