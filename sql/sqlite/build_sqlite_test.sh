@@ -95,7 +95,7 @@ mkdir -p "$BUILD_SUBDIR"
 
 # Compile the test
 $TARGET_CC $FINAL_CFLAGS -DSQLITE_THREADSAFE=1 \
-    "$SQLITE_SRC_DIR/test/threadtest3.c" \
+    ./threadtest3.c \
     build/sqlite3.c \
     "$SQLITE_SRC_DIR/src/test_multiplex.c" \
     -I "$SQLITE_SRC_DIR/test/" \
