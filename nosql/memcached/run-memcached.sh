@@ -14,8 +14,39 @@ MEMCACHED_BINARY_PATH="$MEMCACHED_BUILD_DIR/memcached"
 
 datetime_suffix=$(date +%Y-%m-%d_%H-%M)
 
-NTHREADS=`nproc`
-#NTHREADS=10
+# Default number of threads
+NTHREADS=$(nproc)
+PROFILER_MODE=""
+
+# Parse arguments to find --threads and profiler mode
+# We shift past $1 (CONFIG_TYPE) which we already captured
+shift 
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --threads)
+            if [[ -n "$2" && "$2" =~ ^[0-9]+$ ]]; then
+                NTHREADS="$2"
+                shift 2
+            else
+                echo "Error: --threads requires a numeric argument."
+                exit 1
+            fi
+            ;;
+        vtune)
+            PROFILER_MODE="vtune"
+            shift
+            ;;
+        perf)
+            PROFILER_MODE="perf"
+            shift
+            ;;
+        *)
+            # Ignore other arguments (like 'trace' or 'contention' passed from run-all)
+            shift
+            ;;
+    esac
+done
 
 # Check if the memcached binary exists and is executable
 if [ ! -d "$MEMCACHED_BUILD_DIR" ]; then
@@ -93,13 +124,13 @@ echo "$CONFIG_TYPE" > memcached_type # Store the short config type
 echo "Memcached ($CONFIG_TYPE) started successfully (PID $MEMCACHED_PID)."
 
 # Run VTune profiling
-if [ "$2" == "vtune" ]; then
+if [ "$PROFILER_MODE" == "vtune" ]; then
   echo "$VTUNE_RESULT_DIR" > vtune_result_dir # For run-bench.sh to find and stop
   echo "Starting VTune profiling for PID $MEMCACHED_PID..."
   echo "VTune command: vtune $VTUNE_OPTIONS --target-pid $MEMCACHED_PID"
 	vtune $VTUNE_OPTIONS --target-pid $MEMCACHED_PID
 	echo "VTune results: $VTUNE_RESULT_DIR"
-elif [ "$2" == "perf" ]; then
+elif [ "$PROFILER_MODE" == "perf" ]; then
   echo "Starting perf recording for PID $MEMCACHED_PID..."
 	echo 1 > perf_launched
 	sudo taskset -c 15 perf record -o "${MEMCACHED_BINARY_PATH}.perf" --call-graph dwarf -e cpu-cycles -p $MEMCACHED_PID
