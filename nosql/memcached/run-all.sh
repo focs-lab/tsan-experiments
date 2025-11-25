@@ -69,9 +69,9 @@ for config_name in "${!CONFIG_DETAILS[@]}"; do
     
     # Determine thread counts to test
     if [ "$CONTENTION_MODE" = true ]; then
-        echo "Contention mode enabled. Varying threads from 2 to $(nproc)."
-        # Sequence from 2 to nproc
-        THREAD_COUNTS=$(seq 2 $(nproc))
+        echo "Contention mode enabled. Varying threads from 2 to $(nproc) with step 2."
+        # Sequence from 2 to nproc with step 2
+        THREAD_COUNTS=$(seq 2 2 $(nproc))
     else
         # Default behavior: just run once with default threads (handled by run-memcached default or passed explicitly if needed)
         # We pass $(nproc) explicitly here to be consistent with the new loop logic
@@ -112,7 +112,20 @@ for config_name in "${!CONFIG_DETAILS[@]}"; do
             # The memcached process is stopped by the run-bench.sh script, so no extra cleanup is needed here.
             exit 1
         fi
-        
+
+        # Rename the result file to include thread count if in contention mode
+        # Assuming run-bench.sh produces "results/${config_name}_results.txt"
+        if [ "$CONTENTION_MODE" = true ]; then
+            RESULT_FILE="results/${config_name}_results.txt"
+            NEW_RESULT_FILE="results/${config_name}_t${n_threads}_results.txt"
+            if [ -f "$RESULT_FILE" ]; then
+                mv "$RESULT_FILE" "$NEW_RESULT_FILE"
+                echo "Saved results to $NEW_RESULT_FILE"
+            else
+                echo "Warning: Result file $RESULT_FILE not found, cannot rename for thread count."
+            fi
+        fi
+    
         # Short pause between iterations
         sleep 1
     done

@@ -9,6 +9,12 @@ RESULT_FILE_PATTERN="*_results.txt" # Шаблон для поиска всех 
 METRIC_SECTION_START_MARKER="AGGREGATED AVERAGE RESULTS"
 TOTALS_LINE_MARKER="Totals"
 
+CONTENTION_MODE=false
+if [ "$1" == "--contention" ]; then
+    CONTENTION_MODE=true
+    shift
+fi
+
 # --- Functions ---
 
 extract_metrics() {
@@ -31,6 +37,66 @@ extract_metrics() {
     ' "$file"
 }
 
+# Function to parse contention results
+analyze_contention() {
+    local target_dir="$1"
+    local baseline_config_name="tsan" # The baseline config prefix (e.g. tsan_t4_results.txt)
+
+    echo "==============================================================================="
+    echo "                           CONTENTION ANALYSIS                                 "
+    echo "==============================================================================="
+    echo "Baseline Configuration: $baseline_config_name"
+    echo ""
+
+    # 1. Find all available thread counts based on baseline files
+    # Patterns: tsan_t2_results.txt, tsan_t4_results.txt ...
+    # Extract numbers, sort numerically, unique
+    threads_list=$(find "$target_dir" -name "${baseline_config_name}_t*_results.txt" | \
+                   sed -E "s/.*_${baseline_config_name}_t([0-9]+)_results.txt/\1/" | \
+                   sort -nu)
+
+    if [ -z "$threads_list" ]; then
+        echo "Error: No baseline files found matching pattern ${baseline_config_name}_t<N>_results.txt in $target_dir"
+        return
+    fi
+
+    # 2. Find all other configurations present in the directory
+    # Look for *_t*_results.txt, extract the config name part
+    configs_list=$(find "$target_dir" -name "*_t*_results.txt" | \
+                   sed -E 's/.*results\/(.*)_t[0-9]+_results.txt/\1/' | \
+                   sort -u | grep -v "^${baseline_config_name}$")
+
+    if [ -z "$configs_list" ]; then
+        echo "Error: No other configurations found to compare against baseline."
+        return
+    fi
+
+    # 3. For each configuration, build a table
+    for config in $configs_list; do
+        echo "Configuration: $config (vs $baseline_config_name)"
+        printf "%-10s | %-15s | %-15s | %-10s\n" "Threads" "Baseline Ops" "Current Ops" "Speedup"
+        printf "%-10s-+-%-15s-+-%-15s-+-%-10s\n" "----------" "---------------" "---------------" "----------"
+
+        for t in $threads_list; do
+            baseline_file="${target_dir}/${baseline_config_name}_t${t}_results.txt"
+            current_file="${target_dir}/${config}_t${t}_results.txt"
+
+            # Get metrics
+            read -r base_ops _ <<< "$(extract_metrics "$baseline_file")"
+            read -r curr_ops _ <<< "$(extract_metrics "$current_file")"
+
+            speedup="N/A"
+            if [ "$base_ops" != "N/A" ] && [ "$curr_ops" != "N/A" ] && (( $(echo "$base_ops > 0" | bc -l) )); then
+                speedup=$(echo "scale=2; $curr_ops / $base_ops" | bc -l)
+                speedup="${speedup}x"
+            fi
+
+            printf "%-10s | %15s | %15s | %10s\n" "$t" "$base_ops" "$curr_ops" "$speedup"
+        done
+        echo ""
+    done
+}
+
 # --- Main Script ---
 
 # Определяем директорию для поиска результатов
@@ -40,6 +106,11 @@ if [ -n "$1" ] && [ -d "$1" ]; then
     echo "Analyzing results in directory: $target_dir"
 elif [ -n "$1" ]; then
     echo "Warning: Argument '$1' is not a directory. Analyzing results in '$target_dir'."
+fi
+
+if [ "$CONTENTION_MODE" = true ]; then
+    analyze_contention "$target_dir"
+    exit 0
 fi
 
 # Ищем нативный файл для расчета SD
