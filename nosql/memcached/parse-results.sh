@@ -50,9 +50,9 @@ analyze_contention() {
 
     # 1. Find all available thread counts based on baseline files
     # Patterns: tsan_t2_results.txt, tsan_t4_results.txt ...
-    # Extract numbers, sort numerically, unique
-    threads_list=$(find "$target_dir" -name "${baseline_config_name}_t*_results.txt" | \
-                   sed -E "s/.*_${baseline_config_name}_t([0-9]+)_results.txt/\1/" | \
+    # We look specifically for files starting with the baseline name to establish the thread axis
+    threads_list=$(find "$target_dir" -maxdepth 1 -name "${baseline_config_name}_t*_results.txt" | \
+                   sed -E "s/.*${baseline_config_name}_t([0-9]+)_results.txt/\1/" | \
                    sort -nu)
 
     if [ -z "$threads_list" ]; then
@@ -61,9 +61,11 @@ analyze_contention() {
     fi
 
     # 2. Find all other configurations present in the directory
-    # Look for *_t*_results.txt, extract the config name part
-    configs_list=$(find "$target_dir" -name "*_t*_results.txt" | \
-                   sed -E 's/.*results\/(.*)_t[0-9]+_results.txt/\1/' | \
+    # Look for *_t*_results.txt. We need to extract everything BEFORE "_t<digits>_results.txt"
+    # sed replacement: remove path prefix, then replace _t[0-9]+_results.txt with empty string
+    configs_list=$(find "$target_dir" -maxdepth 1 -name "*_t*_results.txt" | \
+                   sed -E 's|.*/||' | \
+                   sed -E 's/_t[0-9]+_results.txt//' | \
                    sort -u | grep -v "^${baseline_config_name}$")
 
     if [ -z "$configs_list" ]; then
@@ -86,9 +88,13 @@ analyze_contention() {
             read -r curr_ops _ <<< "$(extract_metrics "$current_file")"
 
             speedup="N/A"
-            if [ "$base_ops" != "N/A" ] && [ "$curr_ops" != "N/A" ] && (( $(echo "$base_ops > 0" | bc -l) )); then
-                speedup=$(echo "scale=2; $curr_ops / $base_ops" | bc -l)
-                speedup="${speedup}x"
+            # Check if both files exist and contain valid numbers
+            if [ "$base_ops" != "N/A" ] && [ "$curr_ops" != "N/A" ]; then
+                 # Use bc for float comparison to ensure they are valid numbers > 0
+                 if (( $(echo "$base_ops > 0" | bc -l 2>/dev/null) )); then
+                    speedup=$(echo "scale=2; $curr_ops / $base_ops" | bc -l)
+                    speedup="${speedup}x"
+                 fi
             fi
 
             printf "%-10s | %15s | %15s | %10s\n" "$t" "$base_ops" "$curr_ops" "$speedup"
