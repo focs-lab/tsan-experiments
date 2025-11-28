@@ -135,8 +135,8 @@ run_branch_tests() {
 
 start_time=$(date +%s)
 
-run_branch_tests "dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
-run_branch_tests "escape-analysis"  "escape-analysis.ll"      "check-tsan-escape-analysis"
+run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
+run_branch_tests "tsan-escape-analysis"  "escape-analysis.ll"      "check-tsan-escape-analysis"
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))
