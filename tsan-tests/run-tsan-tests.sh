@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# === CONFIGURATION ===
+LLVM_ROOT="$HOME/dev/llvm-project-tsan"
+LLVM_BUILD="$LLVM_ROOT/llvm/build"   # единственная директория сборки
+LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
+
+C_COMPILER="/usr/bin/clang"
+CXX_COMPILER="/usr/bin/clang++"
+
+# === COLORS ===
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# === FUNCTIONS ===
+
+configure_if_needed() {
+    if [[ -x ./cmake.sh ]]; then
+        echo "⚙️  Using local cmake.sh"
+        ./cmake.sh
+    else
+        echo "⚙️  Configuring build directory manually..."
+        cmake .. -G Ninja \
+          -DCMAKE_C_COMPILER="$C_COMPILER" \
+          -DCMAKE_CXX_COMPILER="$CXX_COMPILER" \
+          -DCMAKE_EXE_LINKER_FLAGS="-fuse-ld=lld -Wl,--gdb-index" \
+          -DCMAKE_BUILD_TYPE=Debug \
+          -DBUILD_SHARED_LIBS=ON \
+          -DLLVM_TARGETS_TO_BUILD=X86 \
+          -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" \
+          -DLLVM_ENABLE_ASSERTIONS=ON \
+          -DLLVM_OPTIMIZED_TABLEGEN=ON \
+          -DLLVM_USE_LINKER=lld \
+          -DLLVM_USE_SPLIT_DWARF=ON \
+          -DCMAKE_LINKER=lld \
+          -DLLVM_PARALLEL_LINK_JOBS=4 \
+          -DLLVM_INCLUDE_TESTS=ON
+    fi
+}
+
+parse_lit_summary() {
+    local logfile=$1
+    grep -E 'Total Discovered Tests|Passed|Unsupported|Failed|Expectedly Failed' "$logfile" || true
+}
+
+run_branch_tests() {
+    local branch=$1
+    local testfile=$2
+    local target=$3
+    local LOG_DIR=$(pwd)
+
+    echo "=============================="
+    echo "🧩 Testing branch: $branch"
+    echo "=============================="
+
+    cd "$LLVM_ROOT"
+    git fetch origin
+    git checkout "origin/$branch"
+
+    echo "⚙️  Building LLVM ($branch)..."
+    cd "$LLVM_BUILD"
+    BUILD_LOG="$LOG_DIR/${branch}-build.log"
+    {
+        configure_if_needed
+        cmake --build . -j"$(nproc)"
+    } &> "$BUILD_LOG" || {
+        echo -e "${RED}❌ Build failed for $branch${NC}"
+        echo "  See log: $BUILD_LOG"
+        return 1
+    }
+    echo -e "${GREEN}✅ Build completed for $branch${NC}"
+
+    echo "🧪 Running local .ll test: $testfile"
+    cd "$LLVM_TEST_DIR"
+    LIT_LOG="$LOG_DIR/${branch}-lit.log"
+    if llvm-lit -v "$testfile" &> "$LIT_LOG"; then
+        echo -e "${GREEN}✅ .ll test passed${NC}"
+    else
+        echo -e "${RED}❌ .ll test failed${NC}"
+    fi
+    parse_lit_summary "$LIT_LOG"
+
+    echo "🏗  Running full check target: $target"
+    cd "$LLVM_BUILD"
+    CHECK_LOG="$LOG_DIR/${branch}-check.log"
+    if cmake --build . --target "$target" -j"$(nproc)" &> "$CHECK_LOG"; then
+        echo -e "${GREEN}✅ check target succeeded${NC}"
+    else
+        echo -e "${YELLOW}⚠️  check target finished with errors${NC}"
+    fi
+    parse_lit_summary "$CHECK_LOG"
+
+    echo
+}
+
+# === MAIN ===
+
+start_time=$(date +%s)
+
+run_branch_tests "dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
+run_branch_tests "escape-analysis"  "escape-analysis.ll"      "check-tsan-escape-analysis"
+
+end_time=$(date +%s)
+runtime=$((end_time - start_time))
+
+echo "===================================="
+echo "🎯 All tests finished in ${runtime}s"
+echo "Logs saved to current directory:"
+echo "  ./dominance-based-build.log"
+echo "  ./dominance-based-lit.log"
+echo "  ./dominance-based-check.log"
+echo "  ./escape-analysis-build.log"
+echo "  ./escape-analysis-lit.log"
+echo "  ./escape-analysis-check.log"
+echo "===================================="
+
