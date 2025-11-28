@@ -2,20 +2,20 @@
 set -euo pipefail
 
 # === CONFIGURATION ===
-# Check for environment variables to set LLVM_ROOT
+# Check for environment variables to set LLVM_BUILD
 if [[ -n "${LLVM_PATH:-}" ]]; then
-    LLVM_ROOT="$LLVM_PATH"
+    LLVM_BUILD="$LLVM_PATH"
 elif [[ -n "${LLVM_HOME:-}" ]]; then
-    LLVM_ROOT="$LLVM_HOME"
+    LLVM_BUILD="$LLVM_HOME"
 elif [[ -n "${LLVM_ROOT_PATH:-}" ]]; then
-    LLVM_ROOT="$LLVM_ROOT_PATH"
+    LLVM_BUILD="$LLVM_ROOT_PATH"
 elif [[ -n "${LLVM_ROOT:-}" ]]; then
-    LLVM_ROOT="$LLVM_ROOT"
+    LLVM_BUILD="$LLVM_ROOT"
 else
-    LLVM_ROOT="$HOME/dev/llvm-project-tsan"
+    LLVM_BUILD="$HOME/dev/llvm-project-tsan/llvm/build"
 fi
 
-LLVM_BUILD="$LLVM_ROOT/llvm/build"   # single build directory
+LLVM_ROOT=$(cd "$LLVM_BUILD/../.." && pwd)  # derive project root from build dir
 LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
 
 C_COMPILER="/usr/bin/clang"
