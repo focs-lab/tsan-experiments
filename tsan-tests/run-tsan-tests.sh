@@ -2,8 +2,20 @@
 set -euo pipefail
 
 # === CONFIGURATION ===
-LLVM_ROOT="$HOME/dev/llvm-project-tsan"
-LLVM_BUILD="$LLVM_ROOT/llvm/build"   # единственная директория сборки
+# Check for environment variables to set LLVM_ROOT
+if [[ -n "${LLVM_PATH:-}" ]]; then
+    LLVM_ROOT="$LLVM_PATH"
+elif [[ -n "${LLVM_HOME:-}" ]]; then
+    LLVM_ROOT="$LLVM_HOME"
+elif [[ -n "${LLVM_ROOT_PATH:-}" ]]; then
+    LLVM_ROOT="$LLVM_ROOT_PATH"
+elif [[ -n "${LLVM_ROOT:-}" ]]; then
+    LLVM_ROOT="$LLVM_ROOT"
+else
+    LLVM_ROOT="$HOME/dev/llvm-project-tsan"
+fi
+
+LLVM_BUILD="$LLVM_ROOT/llvm/build"   # single build directory
 LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
 
 C_COMPILER="/usr/bin/clang"
@@ -14,6 +26,18 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
+
+RUN_CHECK_ALL=false
+
+# Parse arguments
+for arg in "$@"; do
+    case $arg in
+        --check-all)
+        RUN_CHECK_ALL=true
+        shift
+        ;;
+    esac
+done
 
 # === FUNCTIONS ===
 
@@ -92,6 +116,17 @@ run_branch_tests() {
         echo -e "${YELLOW}⚠️  check target finished with errors${NC}"
     fi
     parse_lit_summary "$CHECK_LOG"
+
+    if [ "$RUN_CHECK_ALL" = true ]; then
+        echo "🏗  Running check-all target..."
+        CHECK_ALL_LOG="$LOG_DIR/${branch}-check-all.log"
+        if cmake --build . --target check-all -j"$(nproc)" &> "$CHECK_ALL_LOG"; then
+            echo -e "${GREEN}✅ check-all succeeded${NC}"
+        else
+            echo -e "${YELLOW}⚠️  check-all finished with errors${NC}"
+        fi
+        parse_lit_summary "$CHECK_ALL_LOG"
+    fi
 
     echo
 }
