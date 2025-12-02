@@ -97,23 +97,27 @@ run_branch_tests() {
     }
     echo -e "${GREEN}✅ Build completed for $branch${NC}"
 
-    echo "🧪 Running local .ll test: $testfile"
-    cd "$LLVM_TEST_DIR"
-    LIT_LOG="$LOG_DIR/${branch}-lit.log"
-    if llvm-lit -v "$testfile" &> "$LIT_LOG"; then
-        echo -e "${GREEN}✅ .ll test passed${NC}"
+    if [[ -n "$testfile" ]]; then
+        echo "🧪 Running local .ll test: $testfile"
+        cd "$LLVM_TEST_DIR"
+        LIT_LOG="$LOG_DIR/${branch}-lit.log"
+        if llvm-lit -v "$testfile" &> "$LIT_LOG"; then
+            echo -e "${GREEN}✅ .ll test passed${NC}"
+        else
+            echo -e "${RED}❌ .ll test failed${NC}"
+        fi
+        parse_lit_summary "$LIT_LOG"
     else
-        echo -e "${RED}❌ .ll test failed${NC}"
+        echo "🧪 Skipping local .ll test (no test file specified)"
     fi
-    parse_lit_summary "$LIT_LOG"
 
     echo "🏗  Running full check target: $target"
     cd "$LLVM_BUILD"
     CHECK_LOG="$LOG_DIR/${branch}-check.log"
     if cmake --build . --target "$target" -j"$(nproc)" &> "$CHECK_LOG"; then
-        echo -e "${GREEN}✅ check target succeeded${NC}"
+        echo -e "${GREEN}✅ Check target succeeded${NC}"
     else
-        echo -e "${YELLOW}⚠️  check target finished with errors${NC}"
+        echo -e "${YELLOW}⚠️  Check target finished with errors${NC}"
     fi
     parse_lit_summary "$CHECK_LOG"
 
@@ -137,18 +141,16 @@ start_time=$(date +%s)
 
 run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
 run_branch_tests "tsan-escape-analysis"  "escape-analysis.ll"      "check-tsan-escape-analysis"
+run_branch_tests "main" "" "check-tsan"
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))
 
 echo "===================================="
 echo "🎯 All tests finished in ${runtime}s"
-echo "Logs saved to current directory:"
-echo "  ./dominance-based-build.log"
-echo "  ./dominance-based-lit.log"
-echo "  ./dominance-based-check.log"
-echo "  ./escape-analysis-build.log"
-echo "  ./escape-analysis-lit.log"
-echo "  ./escape-analysis-check.log"
+echo "Logs are saved in the current directory with the pattern:"
+echo "  <branch>-build.log"
+echo "  <branch>-lit.log (if a test file was specified)"
+echo "  <branch>-check.log"
+echo "  <branch>-check-all.log (if --check-all was used)"
 echo "===================================="
-
