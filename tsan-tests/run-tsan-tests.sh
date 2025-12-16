@@ -28,12 +28,17 @@ YELLOW='\033[1;33m'
 NC='\033[0m'
 
 RUN_CHECK_ALL=false
+SKIP_GIT=false
 
 # Parse arguments
 for arg in "$@"; do
     case $arg in
         --check-all)
         RUN_CHECK_ALL=true
+        shift
+        ;;
+        --skip-git)
+        SKIP_GIT=true
         shift
         ;;
     esac
@@ -80,9 +85,13 @@ run_branch_tests() {
     echo "🧩 Testing branch: $branch"
     echo "=============================="
 
-    cd "$LLVM_ROOT"
-    git fetch origin
-    git checkout "origin/$branch"
+    if [ "$SKIP_GIT" = false ]; then
+        cd "$LLVM_ROOT"
+        git fetch origin
+        git checkout "origin/$branch"
+    else
+        echo "⏩ Skipping git checkout (using current source)"
+    fi
 
     echo "⚙️  Building LLVM ($branch)..."
     cd "$LLVM_BUILD"
