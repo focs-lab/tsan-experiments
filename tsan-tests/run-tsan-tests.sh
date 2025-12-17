@@ -85,12 +85,13 @@ run_branch_tests() {
     echo "🧩 Testing branch: $branch"
     echo "=============================="
 
+    cd "$LLVM_ROOT"
     if [ "$SKIP_GIT" = false ]; then
-        cd "$LLVM_ROOT"
         git fetch origin
         git checkout "origin/$branch"
     else
-        echo "⏩ Skipping git checkout (using current source)"
+        echo "⏩ Skipping git fetch (using local repository)"
+        git checkout "$branch"
     fi
 
     echo "⚙️  Building LLVM ($branch)..."
