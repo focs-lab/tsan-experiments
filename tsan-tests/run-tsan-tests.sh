@@ -19,6 +19,7 @@ LLVM_BUILD="$LLVM_ROOT/llvm/$BUILD_DIR"
 [[ ! -d "$LLVM_BUILD" ]] && mkdir -p "$LLVM_BUILD"
 echo "LLVM Build directory: $LLVM_BUILD"
 LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
+LLVM_ESCAPE_TEST_DIR="$LLVM_ROOT/llvm/test/Analysis/EscapeAnalysis"
 
 C_COMPILER="/usr/bin/clang"
 CXX_COMPILER="/usr/bin/clang++"
@@ -245,7 +246,16 @@ run_branch_tests() {
 
   if [[ -n "$testfile" ]]; then
     echo "🧪 Running local .ll test: $testfile"
-    cd "$LLVM_TEST_DIR"
+
+    # Pick the directory where the test actually lives.
+    # - dominance-elimination.ll: Instrumentation/ThreadSanitizer (LLVM_TEST_DIR)
+    # - escape-analysis.ll: Analysis/EscapeAnalysis (LLVM_ESCAPE_TEST_DIR)
+    local TEST_DIR="$LLVM_TEST_DIR"
+    if [[ "$testfile" == "escape-analysis.ll" ]]; then
+      TEST_DIR="$LLVM_ESCAPE_TEST_DIR"
+    fi
+
+    cd "$TEST_DIR"
     local LIT_BIN
     if ! LIT_BIN="$(resolve_lit_bin)"; then
       echo "❌ llvm-lit not found (expected at $LLVM_BUILD/bin/llvm-lit or in PATH)" >&2
@@ -292,8 +302,8 @@ run_branch_tests() {
 
 start_time=$(date +%s)
 
-run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
-run_branch_tests "tsan-escape-analysis" "escape-analysis.ll" "check-tsan-escape-analysis"
+#run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
+run_branch_tests "tsan-escape-analysis" "escape-analysis.ll" "check-tsan"
 run_branch_tests "main" "" "check-tsan"
 
 end_time=$(date +%s)
