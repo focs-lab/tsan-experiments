@@ -3,12 +3,21 @@ set -euo pipefail
 
 # === CONFIGURATION ===
 # Check for environment variables to set LLVM_BUILD
-BUILD_DIR="cmake-build-for-test"
+DEFAULT_LLVM_ROOT="$HOME/dev/llvm-project-tsan"
+BUILD_DIR="build-for-test"
+
+# Use N% of CPUs for builds (default: 75)
+CPU_PERCENT="${CPU_PERCENT:-50}"
+
+C_COMPILER="/usr/bin/clang"
+CXX_COMPILER="/usr/bin/clang++"
+
 LLVM_ROOT="${LLVM_TSAN_SOURCE:+$LLVM_TSAN_SOURCE}"
-LLVM_ROOT="${LLVM_ROOT:-$HOME/dev/llvm-project-tsan}"
+LLVM_ROOT="${LLVM_ROOT:-$DEFAULT_LLVM_ROOT}"
 LLVM_BUILD="$LLVM_ROOT/llvm/$BUILD_DIR"
-mkdir -p "$LLVM_BUILD"
-echo $LLVM_BUILD
+
+[[ ! -d "$LLVM_BUILD" ]] && mkdir -p "$LLVM_BUILD"
+echo "LLVM Build directory: $LLVM_BUILD"
 LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
 
 C_COMPILER="/usr/bin/clang"
@@ -34,13 +43,28 @@ resolve_lit_bin() {
   return 1
 }
 
-# CPU jobs fallback
-jobs() {
+_total_cpus() {
   if command -v nproc >/dev/null 2>&1; then
     nproc
   else
     getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4
   fi
+}
+
+jobs() {
+  local total pct j
+  total="$(_total_cpus)"
+  pct="${CPU_PERCENT}"
+
+  if ! [[ "$pct" =~ ^[0-9]+$ ]]; then
+    pct=75
+  fi
+  if (( pct < 1 )); then pct=1; fi
+  if (( pct > 100 )); then pct=100; fi
+
+  j=$(( (total * pct + 99) / 100 ))
+  if (( j < 1 )); then j=1; fi
+  echo "$j"
 }
 
 # === COLORS ===
@@ -88,7 +112,7 @@ configure_if_needed() {
       -DCMAKE_BUILD_TYPE=Debug \
       -DBUILD_SHARED_LIBS=ON \
       -DLLVM_TARGETS_TO_BUILD=X86 \
-      -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" \
+      -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" \
       -DLLVM_ENABLE_ASSERTIONS=ON \
       -DLLVM_OPTIMIZED_TABLEGEN=ON \
       -DLLVM_USE_LINKER=lld \
@@ -133,6 +157,7 @@ run_branch_tests() {
   local BUILD_LOG="$LOG_DIR/${branch}-build.log"
   {
     configure_if_needed
+    echo cmake --build . -j"$(jobs)"
     cmake --build . -j"$(jobs)"
   } &>"$BUILD_LOG" || {
     echo -e "${RED}❌ Build failed for $branch${NC}"
@@ -163,6 +188,7 @@ run_branch_tests() {
   echo "🏗  Running full check target: $target"
   cd "$LLVM_BUILD"
   local CHECK_LOG="$LOG_DIR/${branch}-check.log"
+  echo cmake --build . --target "$target" -j"$(jobs)"
   if cmake --build . --target "$target" -j"$(jobs)" &>"$CHECK_LOG"; then
     echo -e "${GREEN}✅ Check target succeeded${NC}"
   else
@@ -173,6 +199,7 @@ run_branch_tests() {
   if [ "$RUN_CHECK_ALL" = true ]; then
     echo "🏗  Running check-all target..."
     local CHECK_ALL_LOG="$LOG_DIR/${branch}-check-all.log"
+    echo cmake --build . --target check-all -j"$(jobs)"
     if cmake --build . --target check-all -j"$(jobs)" &>"$CHECK_ALL_LOG"; then
       echo -e "${GREEN}✅ check-all succeeded${NC}"
     else
