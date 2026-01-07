@@ -4,7 +4,7 @@ set -euo pipefail
 # === CONFIGURATION ===
 # Check for environment variables to set LLVM_BUILD
 DEFAULT_LLVM_ROOT="$HOME/dev/llvm-project-tsan"
-BUILD_DIR="build-for-test"
+BUILD_DIR="cmake-build-for-test"
 
 # Use N% of CPUs for builds (default: 75)
 CPU_PERCENT="${CPU_PERCENT:-50}"
@@ -99,6 +99,78 @@ done
 
 # === FUNCTIONS ===
 
+# Track & restore the original git state so the script doesn't leave the repo detached.
+START_PWD="$(pwd)"
+GIT_STATE_CHANGED=false
+START_GIT_COMMIT=""
+START_GIT_BRANCH=""
+START_GIT_DETACHED=false
+
+snapshot_git_state() {
+  cd "$LLVM_ROOT" 2>/dev/null || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  START_GIT_COMMIT="$(git rev-parse HEAD 2>/dev/null || true)"
+  START_GIT_BRANCH="$(git symbolic-ref -q --short HEAD 2>/dev/null || true)"
+  if [[ -z "$START_GIT_BRANCH" ]]; then
+    START_GIT_DETACHED=true
+  fi
+}
+
+ensure_clean_worktree_or_exit() {
+  # User-requested behavior: if there are any uncommitted changes, abort immediately.
+  cd "$LLVM_ROOT" 2>/dev/null || return 0
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
+
+  if ! git diff --quiet --ignore-submodules -- 2>/dev/null || ! git diff --quiet --ignore-submodules --cached -- 2>/dev/null; then
+    echo -e "${RED}❌ Uncommitted changes detected in $LLVM_ROOT; aborting.${NC}" >&2
+    echo "   Please commit/stash changes (or run the script in a clean worktree) and retry." >&2
+    exit 1
+  fi
+}
+
+restore_git_state() {
+  # Always try to restore the original branch/commit, but only if we changed it.
+  # Never hard-reset or stash automatically.
+  local exit_code=$?
+
+  cd "$START_PWD" 2>/dev/null || true
+
+  if [[ "$GIT_STATE_CHANGED" != "true" ]]; then
+    return "$exit_code"
+  fi
+
+  cd "$LLVM_ROOT" 2>/dev/null || return "$exit_code"
+  git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return "$exit_code"
+
+  # If the working tree is dirty, don't risk surprising behavior; still attempt a switch.
+  if ! git diff --quiet --ignore-submodules -- 2>/dev/null || ! git diff --quiet --ignore-submodules --cached -- 2>/dev/null; then
+    echo -e "${YELLOW}⚠️  Working tree has uncommitted changes; restoring branch/commit without cleaning.${NC}" >&2
+  fi
+
+  if [[ "$START_GIT_DETACHED" == "true" ]]; then
+    if [[ -n "$START_GIT_COMMIT" ]]; then
+      git switch --detach "$START_GIT_COMMIT" >/dev/null 2>&1 || true
+    fi
+  else
+    if [[ -n "$START_GIT_BRANCH" ]]; then
+      git switch "$START_GIT_BRANCH" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  cd "$START_PWD" 2>/dev/null || true
+  return "$exit_code"
+}
+
+snapshot_git_state
+
+# Before we start switching branches, require a clean worktree.
+if [[ "$SKIP_GIT" = false ]]; then
+  ensure_clean_worktree_or_exit
+fi
+
+trap restore_git_state EXIT INT TERM
+
 configure_if_needed() {
   if [[ -x ./cmake.sh ]]; then
     echo "⚙️  Using local cmake.sh"
@@ -140,12 +212,17 @@ run_branch_tests() {
 
   cd "$LLVM_ROOT"
   if [ "$SKIP_GIT" = false ]; then
+    # Guard in case the build system generated/modified files in the worktree.
+    ensure_clean_worktree_or_exit
+
     git fetch --prune origin
     git switch --detach "origin/$branch"
+    GIT_STATE_CHANGED=true
   else
     echo "⏩ Skipping git fetch (using local repository)"
     if git show-ref --verify --quiet "refs/heads/$branch"; then
       git switch "$branch"
+      GIT_STATE_CHANGED=true
     else
       echo "❌ Branch not found locally: $branch" >&2
       return 1
@@ -172,7 +249,7 @@ run_branch_tests() {
     local LIT_BIN
     if ! LIT_BIN="$(resolve_lit_bin)"; then
       echo "❌ llvm-lit not found (expected at $LLVM_BUILD/bin/llvm-lit or in PATH)" >&2
-      exit 1
+      return 1
     fi
     local LIT_LOG="$LOG_DIR/${branch}-lit.log"
     if "$LIT_BIN" -v "$testfile" &>"$LIT_LOG"; then
