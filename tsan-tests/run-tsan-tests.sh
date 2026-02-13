@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+export CCACHE_DISABLE=1
+
 # === CONFIGURATION ===
 # Check for environment variables to set LLVM_BUILD
 DEFAULT_LLVM_ROOT="$HOME/dev/llvm-project-tsan"
 BUILD_DIR="cmake-build-for-test"
 
 # Use N% of CPUs for builds (default: 75)
-CPU_PERCENT="${CPU_PERCENT:-50}"
+CPU_PERCENT="${CPU_PERCENT:-80}"
 
 C_COMPILER="/usr/bin/clang"
 CXX_COMPILER="/usr/bin/clang++"
@@ -185,12 +187,11 @@ configure_if_needed() {
       -DCMAKE_BUILD_TYPE=Debug \
       -DBUILD_SHARED_LIBS=ON \
       -DLLVM_TARGETS_TO_BUILD=X86 \
-      -DLLVM_ENABLE_PROJECTS="clang;compiler-rt" \
+      -DLLVM_ENABLE_PROJECTS="clang;lld;compiler-rt" \
       -DLLVM_ENABLE_ASSERTIONS=ON \
       -DLLVM_OPTIMIZED_TABLEGEN=ON \
       -DLLVM_USE_LINKER=lld \
       -DLLVM_USE_SPLIT_DWARF=ON \
-      -DCMAKE_LINKER=lld \
       -DLLVM_PARALLEL_LINK_JOBS=4 \
       -DLLVM_INCLUDE_TESTS=ON
   fi
@@ -205,11 +206,15 @@ run_branch_tests() {
   local branch=$1
   local testfile=$2
   local target=$3
-  local LOG_DIR="$(pwd)"
+  local LOG_DIR="$LLVM_ROOT"
 
   echo "=============================="
   echo "🧩 Testing branch: $branch"
   echo "=============================="
+
+  echo "rm -rf $LLVM_BUILD"
+  rm -rf $LLVM_BUILD
+  mkdir -p $LLVM_BUILD
 
   cd "$LLVM_ROOT"
   if [ "$SKIP_GIT" = false ]; then
@@ -286,6 +291,7 @@ run_branch_tests() {
   if [ "$RUN_CHECK_ALL" = true ]; then
     echo "🏗  Running check-all target..."
     local CHECK_ALL_LOG="$LOG_DIR/${branch}-check-all.log"
+    echo "CHECK_ALL_LOG: $CHECK_ALL_LOG"
     echo cmake --build . --target check-all -j"$(jobs)"
     if cmake --build . --target check-all -j"$(jobs)" &>"$CHECK_ALL_LOG"; then
       echo -e "${GREEN}✅ check-all succeeded${NC}"
@@ -302,9 +308,9 @@ run_branch_tests() {
 
 start_time=$(date +%s)
 
-#run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
-run_branch_tests "tsan-escape-analysis" "escape-analysis.ll" "check-tsan"
 run_branch_tests "main" "" "check-tsan"
+run_branch_tests "tsan-escape-analysis" "escape-analysis.ll" "check-tsan"
+run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))
