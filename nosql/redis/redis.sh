@@ -34,7 +34,9 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 # - orig: Original build without instrumentation
 # - tsan: Basic ThreadSanitizer build
 # - Various optimization combinations (dom, ea, lo, st, swmr)
-BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
+#BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
+#BUILD_OPTIONS="orig tsan dom dom_peeling"
+BUILD_OPTIONS="orig tsan tsan_no_atomics"
 #BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
 #    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
 #    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
@@ -69,6 +71,11 @@ usage() {
     echo ""
     echo "By default (with no options), the script runs both compilation and tests."
 }
+
+if systemctl is-active --quiet redis-server; then
+    echo "Error: redis-server service is running. Aborting." >&2
+    exit 1
+fi
 
 # Print formatted log messages with arrow prefix
 log() {
@@ -197,7 +204,7 @@ if [ "$COMPILE" = true ]; then
 
     log "Building redis-benchmark"
     cd redis-benchmark/src
-    make -j $(nproc) redis-benchmark > /dev/null 2>&1
+    make -j $(nproc) redis-benchmark #> /dev/null 2>&1
     cd ../..
 
     if [[ -d "$SCRIPT_DIR/summaries" ]]
@@ -259,7 +266,8 @@ if [ "$COMPILE" = true ]; then
 
         if [[ "$OPTION" = "orig" ]]
         then
-            USE_JEMALLOC=no make redis-server -j $(nproc) > /dev/null 2>&1
+            log "Building orig"
+            USE_JEMALLOC=no make redis-server -j $(nproc) #> /dev/null 2>&1
         elif [[ "$OPTION" = "tsan" ]]
         then
             SANITIZER=thread USE_JEMALLOC=no make redis-server -j $(nproc) > /dev/null 2>&1
@@ -277,13 +285,16 @@ if [ "$COMPILE" = true ]; then
               cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
 
             TSAN_FLAGS=""
+            [[ "$OPTION" == *"tsan_no_atomics"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-instrument-atomics=false"
             [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
             [[ "$OPTION" == *"swmr"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr"
             [[ "$OPTION" == *"st"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-single-threaded"
             [[ "$OPTION" == *"ea"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global"
             [[ "$OPTION" == *"dom"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis"
-            
-            SANITIZER=thread USE_JEMALLOC=no CFLAGS="$TSAN_FLAGS" make redis-server -j $(nproc) > /dev/null 2>&1
+            [[ "$OPTION" == *"dom_peeling"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
+
+            log "Building $OPTION"
+            SANITIZER=thread USE_JEMALLOC=no CFLAGS="$TSAN_FLAGS" make redis-server -j $(nproc) #> /dev/null 2>&1
         fi
 
         duration=$(( SECONDS - start_time ))
@@ -396,6 +407,11 @@ if [ "$TESTS" = true ]; then
         
         killall -9 redis-server
         sleep 5
+
+        if pgrep -x "redis-server" > /dev/null; then
+          echo "Error: redis-server is already running. Aborting execution." >&2
+          exit 1
+        fi
         
         rm -f dump.rdb
     done
