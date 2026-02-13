@@ -1,7 +1,7 @@
 #!/bin/bash
 
 NTHREADS=10
-NTESTS=2
+NTESTS=5
 MEMTIER_EXTRA_ARGS=""
 
 # Check for trace argument

@@ -15,6 +15,7 @@ CONFIG_DETAILS["tsan-st"]="-mllvm -tsan-use-single-threaded"
 CONFIG_DETAILS["tsan-swmr"]="-mllvm -tsan-use-swmr"
 CONFIG_DETAILS["tsan-ea"]="-mllvm -tsan-use-escape-analysis-global"
 CONFIG_DETAILS["tsan-dom"]="-mllvm -tsan-use-dominance-analysis"
+CONFIG_DETAILS["tsan-dom_peeling"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
 CONFIG_DETAILS["tsan-all"]="-mllvm -tsan-use-dominance-analysis \
                             -mllvm -tsan-use-lock-ownership \
                             -mllvm -tsan-use-single-threaded \
