@@ -12,6 +12,7 @@ CONFIG_DETAILS["tsan"]="FLAGS_TSAN_BASE"  # Special marker for basic TSan flags
 CONFIG_DETAILS["tsan-lo"]="-mllvm -tsan-use-lock-ownership"
 #CONFIG_DETAILS["tsan-loub"]="-mllvm -tsan-use-lock-ownership-upperbound"
 CONFIG_DETAILS["tsan-st"]="-mllvm -tsan-use-single-threaded"
+CONFIG_DETAILS["tsan-stmt"]="-mllvm -tsan-use-active-thread-count"
 CONFIG_DETAILS["tsan-swmr"]="-mllvm -tsan-use-swmr"
 CONFIG_DETAILS["tsan-ea"]="-mllvm -tsan-use-escape-analysis-global"
 CONFIG_DETAILS["tsan-dom"]="-mllvm -tsan-use-dominance-analysis"
