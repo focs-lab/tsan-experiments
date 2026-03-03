@@ -139,7 +139,7 @@ FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
 
 # Special CMake option for TSan:
 CMAKE_TSAN_OPTION=""
-[ "$IS_TSAN_BUILD" = true ] && CMAKE_TSAN_OPTION="-DWITH_TSAN=ON"
+[ "$IS_TSAN_BUILD" = true ] && CMAKE_TSAN_OPTION="-DWITH_TSAN=ON -DWITH_LIBEVENT=bundled"
 
 
 # Directory for this specific build
