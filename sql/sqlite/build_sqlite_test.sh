@@ -43,7 +43,7 @@ if [ ! -f "build/sqlite3.c" ] || [ ! -d "$SQLITE_SRC_DIR" ]; then
 fi
 
 # Determine compiler and flags
-FLAGS_COMMON_BASE_VAL="-g -O2"
+FLAGS_COMMON_BASE_VAL="-g -O2 -fno-omit-frame-pointer"
 FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
 FINAL_CFLAGS=""
 TARGET_CC=""

@@ -27,10 +27,19 @@ shift # Consume config_type, the rest of the arguments are in $@
 NTHREADS=""
 USE_VTUNE=false
 USE_TRACE=false
+VTUNE_SAMPLING_MODE="hw"   # can be overridden by passing vtune-sw / vtune-hw
 for arg in "$@"; do
     case "$arg" in
         vtune)
             USE_VTUNE=true
+            ;;
+        vtune-sw)
+            USE_VTUNE=true
+            VTUNE_SAMPLING_MODE="sw"
+            ;;
+        vtune-hw)
+            USE_VTUNE=true
+            VTUNE_SAMPLING_MODE="hw"
             ;;
         trace)
             USE_TRACE=true
@@ -105,10 +114,25 @@ fi
 if [ "$USE_VTUNE" = true ]; then
     VTUNE_ANALYSIS_TYPE="hotspots" # Common analysis types: hotspots, threading, memory-consumption
     VTUNE_RESULT_DIR="$VTUNE_RESULTS_ROOT/sqlite_${CONFIG_TYPE}_$(date +%Y-%m-%d_%H-%M)"
-    VTUNE_OPTIONS="--collect=$VTUNE_ANALYSIS_TYPE --result-dir=$VTUNE_RESULT_DIR -knob sampling-mode=hw"
+
+    #
+    # Flame graph in VTune requires call stacks.
+    # For sampling this usually means:
+    #  - knobs: enable stack collection (and optionally set stackwalk method)
+    #  - build: keep debug symbols and preferably frame pointers
+    #
+    # NOTE: hw sampling may produce limited/empty stacks on some platforms/kernels.
+    # If you don't see stacks/flamegraph, try passing `vtune-sw`.
+    #
+    VTUNE_OPTIONS="--collect=$VTUNE_ANALYSIS_TYPE --result-dir=$VTUNE_RESULT_DIR"
+    VTUNE_OPTIONS+=" -knob sampling-mode=${VTUNE_SAMPLING_MODE}"
+    VTUNE_OPTIONS+=" -knob enable-stack-collection=true"
+#    VTUNE_OPTIONS+=" -knob stackwalk=offline"   # best-effort, doesn't require unwinding during collection
+    VTUNE_OPTIONS+=" -data-limit=0"             # avoid premature stop at 1000MB (can kill stacks)
 
     echo "VTune Profiling: ENABLED"
     echo "VTune Analysis Type: $VTUNE_ANALYSIS_TYPE"
+    echo "VTune sampling mode: $VTUNE_SAMPLING_MODE"
     echo "VTune results will be stored in: $VTUNE_RESULT_DIR"
 
     # Prepend the vtune command and its options
