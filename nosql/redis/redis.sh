@@ -16,7 +16,7 @@ BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
 #------------------------------------------------------------------------------
 # Directory and File Paths
 #------------------------------------------------------------------------------
-BENCH_POLYGON_DIR="/dev/shm/redis-polygon"     # Working directory for builds
+BENCH_POLYGON_DIR="$(pwd)/redis-polygon"     # Working directory for builds
 BENCH_ARCHIVE_NAME=$(basename "$BENCH_ARCHIVE_URL")
 SCRIPT_DIR=$(dirname $(realpath -s "$0"))
 
@@ -36,7 +36,8 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 # - Various optimization combinations (dom, ea, lo, st, swmr)
 #BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
 #BUILD_OPTIONS="orig tsan dom dom_peeling"
-BUILD_OPTIONS="orig tsan tsan_no_atomics"
+#BUILD_OPTIONS="tsan tsan_no_atomics"
+BUILD_OPTIONS="tsan tsan-stmt"
 #BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
 #    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
 #    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
@@ -55,6 +56,8 @@ COMPILE=true
 TESTS=true
 TRACE_MODE=false
 COUNT_INSTRUCTIONS=false
+
+export TSAN_OPTIONS="report_bugs=0"
 
 usage() {
     echo "Usage: $0 [ --compile-only | --test-only | trace | --help ]"
@@ -289,6 +292,7 @@ if [ "$COMPILE" = true ]; then
             [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
             [[ "$OPTION" == *"swmr"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr"
             [[ "$OPTION" == *"st"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-single-threaded"
+            [[ "$OPTION" == *"stmt"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-active-thread-count"
             [[ "$OPTION" == *"ea"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global"
             [[ "$OPTION" == *"dom"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis"
             [[ "$OPTION" == *"dom_peeling"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
