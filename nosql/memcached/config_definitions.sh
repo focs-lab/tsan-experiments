@@ -17,12 +17,14 @@ CONFIG_DETAILS["tsan-swmr"]="-mllvm -tsan-use-swmr"
 CONFIG_DETAILS["tsan-ea"]="-mllvm -tsan-use-escape-analysis-global"
 CONFIG_DETAILS["tsan-dom"]="-mllvm -tsan-use-dominance-analysis"
 CONFIG_DETAILS["tsan-dom_peeling"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
-CONFIG_DETAILS["tsan-all"]="-mllvm -tsan-use-dominance-analysis \
+CONFIG_DETAILS["tsan-all"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true \
                             -mllvm -tsan-use-lock-ownership \
                             -mllvm -tsan-use-single-threaded \
                             -mllvm -tsan-use-swmr \
                             -mllvm -tsan-use-escape-analysis-global"
-
-# You can add more configurations here following the same pattern.
-# Example:
-# CONFIG_DETAILS["tsan-new-opt"]="-mllvm -tsan-new-optimization-flag"
+CONFIG_DETAILS["tsan-all_stmt"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true \
+                                 -mllvm -tsan-use-lock-ownership \
+                                 -mllvm -tsan-use-single-threaded \
+                                 -mllvm -tsan-use-swmr \
+                                 -mllvm -tsan-use-escape-analysis-global \
+                                 -mllvm -tsan-use-active-thread-count"
