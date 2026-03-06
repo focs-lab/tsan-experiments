@@ -9,7 +9,8 @@ FF_TEST_VIDEO="./input/WatchingEyeTexture.mkv"
 FF_BUILD_LIST_STR=$(ls -d ffmpeg-orig ffmpeg-tsan* 2>/dev/null | xargs)
 [ -z "$FF_BUILD_LIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-tsan* ffmpeg-orig\")." && exit 2
 
-#FF_BUILD_LIST_STR="ffmpeg-tsan-dom"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
+#FF_BUILD_LIST_STR="ffmpeg-orig ffmpeg-tsan ffmpeg-tsan-stmt ffmpeg-tsan-dom_peeling ffmpeg-tsan-dom"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
+#FF_BUILD_LIST_STR="ffmpeg-tsan-dom_peeling-ea-lo-st-swmr ffmpeg-tsan-dom_peeling-ea-lo-st-swmr-stmt"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
 
 # Number of runs to average the results (force set to 1 with `--trace`):
 RUNS_COUNT=3

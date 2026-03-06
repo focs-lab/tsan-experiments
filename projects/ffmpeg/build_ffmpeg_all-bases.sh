@@ -47,8 +47,9 @@ if [ ${#CONFIG_DETAILS[@]} -eq 0 ]; then
 fi
 
 # List of configurations to build
-#BUILDTYPELIST="orig  tsan  tsan-dom  tsan-ea  tsan-lo  tsan-loub  tsan-st  tsan-swmr  tsan-dom-ea-lo-st-swmr"
-BUILDTYPELIST="${!CONFIG_DETAILS[@]} tsan-dom-ea-lo-st-swmr"
+#BUILDTYPELIST="tsan-dom  tsan-ea  tsan-lo  tsan-loub  tsan-st  tsan-swmr  tsan-dom-ea-lo-st-swmr"
+#BUILDTYPELIST="tsan-dom_peeling-ea-lo-st-swmr-stmt"
+BUILDTYPELIST="${!CONFIG_DETAILS[@]} tsan-dom_peeling-ea-lo-st-swmr-stmt tsan-dom_peeling-ea-lo-st-swmr"
 BUILDTYPELIST="$(echo $BUILDTYPELIST | xargs)"
 
 #echo $BUILDTYPELIST; exit
