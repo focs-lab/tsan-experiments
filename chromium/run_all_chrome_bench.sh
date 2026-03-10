@@ -7,47 +7,52 @@ OUTPUT_DIR="results"
 TESTS="speedometer3 blink_perf.svg blink_perf.layout blink_perf.dom blink_perf.parser"
 
 # List of Chrome builds to test
-BUILDS="chrome-orig chrome-tsan chrome-tsan-all chrome-tsan-dom chrome-tsan-ea chrome-tsan-lo chrome-tsan-stc chrome-tsan-swmr"
+#BUILDS="chrome-orig chrome-tsan chrome-tsan-all chrome-tsan-dom chrome-tsan-ea chrome-tsan-lo chrome-tsan-stc chrome-tsan-swmr"
+BUILDS="chrome-tsan chrome-tsan-all"
 
 # Loop over each test
-for TEST in $TESTS
-do
+for TEST in $TESTS; do
   # Create a subdirectory for the current test's results
   TEST_OUTPUT_DIR="$OUTPUT_DIR/$TEST"
 
+  mkdir -p "$TEST_OUTPUT_DIR"
+
   # Loop over each build configuration
-  for BUILD in $BUILDS
-  do
+  for BUILD in $BUILDS; do
     echo "Running test '$TEST' with build '$BUILD'"
 
     EXECUTABLE="out/$BUILD/chrome"
     MEMORY_LOG="$TEST_OUTPUT_DIR/memory_$BUILD.log"
 
-    # Common arguments for run_benchmark
-    BENCH_ARGS="$TEST \
-      --browser=exact \
-      --browser-executable=$EXECUTABLE \
-      --output-dir=$TEST_OUTPUT_DIR \
-      --results-label=$BUILD"
-
-    # Command to measure peak memory usage
-    # The result (in kilobytes) will be saved to $MEMORY_LOG
-    TIME_CMD="/usr/bin/time -o $MEMORY_LOG -f %M"
-
     RUNNER=""
     if [ -z "$DISPLAY" ]; then
+      if ! command -v xvfb-run > /dev/null 2>&1; then
+        echo "Error: DISPLAY is not set and xvfb-run is not available. Install xvfb or set up a display."
+        exit 1
+      fi
       RUNNER="xvfb-run"
     fi
 
     if [ "$BUILD" = "chrome-orig" ]; then
       # Run for the native build
-      $RUNNER $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS \
-        --extra-browser-args="--no-sandbox --disable-gpu"
+      $RUNNER /usr/bin/time -o "$MEMORY_LOG" -f %M \
+        tools/perf/run_benchmark "$TEST" \
+          --browser=exact \
+          --browser-executable="$EXECUTABLE" \
+          --output-dir="$TEST_OUTPUT_DIR" \
+          --results-label="$BUILD" \
+          --extra-browser-args="--no-sandbox --disable-gpu"
     else
       # Run for TSan builds with extra options
-      TSAN_OPTIONS="atexit_sleep_ms=200 flush_memory_ms=2000" \
-      $RUNNER $TIME_CMD tools/perf/run_benchmark $BENCH_ARGS \
-        --extra-browser-args="--no-sandbox --disable-gpu"
+      export TSAN_OPTIONS="atexit_sleep_ms=200 flush_memory_ms=2000"
+      $RUNNER /usr/bin/time -o "$MEMORY_LOG" -f %M \
+        tools/perf/run_benchmark "$TEST" \
+          --browser=exact \
+          --browser-executable="$EXECUTABLE" \
+          --output-dir="$TEST_OUTPUT_DIR" \
+          --results-label="$BUILD" \
+          --extra-browser-args="--no-sandbox --disable-gpu"
+      unset TSAN_OPTIONS
     fi
 
     echo "Test '$TEST' with build '$BUILD' finished. Peak memory usage (KB) saved to $MEMORY_LOG"
