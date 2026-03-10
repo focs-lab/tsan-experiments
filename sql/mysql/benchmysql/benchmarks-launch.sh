@@ -21,7 +21,7 @@ INSCRIPT_BENCH_USE_TIME="false"
 # Select all or override with some specific builds:
 #MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed "s/[,\n\t]/ /g" | sed "s/\s\s\+/ /g")
 MYSQLBUILDLIST=$(ls -d "$MYSQL_BUILDS_DIR"/mysql-tsan "$MYSQL_BUILDS_DIR"/mysql-tsan-* "$MYSQL_BUILDS_DIR"/mysql-orig | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs basename -a | xargs)
-#MYSQLBUILDLIST="mysql-tsan-dom-ea-lo-st-swmr mysql-orig mysql-tsan mysql-tsan-dom"
+#MYSQLBUILDLIST="mysql-orig mysql-tsan mysql-tsan-dom mysql-tsan-dom_peeling mysql-tsan-stmt"
 
 
 logmessage() {

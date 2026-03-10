@@ -47,7 +47,7 @@ if [ ${#CONFIG_DETAILS[@]} -eq 0 ]; then
 fi
 
 # List of configurations to build
-BUILDTYPELIST="orig tsan tsan-dom-ea-lo-st-swmr tsan-dom tsan-ea tsan-st tsan-swmr tsan-lo"
+BUILDTYPELIST="${!CONFIG_DETAILS[@]} tsan-dom_peeling-ea-lo-st-swmr tsan-dom_peeling-ea-lo-st-swmr-stmt"
 BUILDTYPELIST="$(echo $BUILDTYPELIST | xargs)"
 
 # 2. Create results directory and clear/create the results files
