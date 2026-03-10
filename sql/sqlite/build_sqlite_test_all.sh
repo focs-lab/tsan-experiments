@@ -24,8 +24,11 @@ stats_log_file="$results_dir/instr_count.log"
 
 echo "Starting build for all test configurations..."
 
+CONFIG_LIST="${!CONFIG_DETAILS[@]} tsan-dom_peeling-ea-lo-st-swmr tsan-dom_peeling-ea-lo-st-swmr-stmt"
+#CONFIG_LIST="orig tsan tsan-dom_peeling tsan-stmt tsan-dom_peeling-ea-lo-st-swmr tsan-dom_peeling-ea-lo-st-swmr-stmt"
+
 # Iterate over all keys (configuration names) in CONFIG_DETAILS
-for config_name in "${!CONFIG_DETAILS[@]}" "tsan-dom-ea-lo-st-swmr"; do
+for config_name in $CONFIG_LIST; do
     echo "----------------------------------------"
     echo "Building configuration: $config_name"
 
@@ -65,8 +68,15 @@ for config_name in "${!CONFIG_DETAILS[@]}" "tsan-dom-ea-lo-st-swmr"; do
     rm -f *.db *.db-wal
 done
 
+echo "----------------------------------------"
+echo "Building all configurations completed."
+echo "Compilation times logged to $compilation_log_file"
+echo "Instruction counts logged to $stats_log_file"
+
+exit
+
 # All optimizations
-config_name="tsan-dom-ea-lo-st-swmr"
+config_name="tsan-dom_peeling-ea-lo-st-swmr"
 echo "----------------------------------------"
 echo "Building configuration: $config_name"
 
