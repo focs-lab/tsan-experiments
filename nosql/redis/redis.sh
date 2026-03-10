@@ -37,7 +37,15 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 #BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
 #BUILD_OPTIONS="orig tsan dom dom_peeling"
 #BUILD_OPTIONS="tsan tsan_no_atomics"
-BUILD_OPTIONS="tsan tsan-stmt"
+#BUILD_OPTIONS="orig tsan dom ea lo st swmr dom_peeling-ea-lo-st-swmr-stmt stmt dom_peeling"
+
+#BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr stmt dom_peeling"
+#BUILD_OPTIONS="tsan"
+#BUILD_OPTIONS="orig tsan dom dom_peeling ea lo st swmr stmt dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr"
+
+BUILD_OPTIONS="orig tsan dom dom_peeling dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr"
+#BUILD_OPTIONS="orig tsan"
+
 #BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
 #    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
 #    swmr dom-swmr ea-swmr dom-ea-swmr lo-swmr dom-lo-swmr ea-lo-swmr \
@@ -193,7 +201,7 @@ function run {
 
 if [ "$COMPILE" = true ]; then
     log "Creating Redis polygon"
-    rm -rf "$BENCH_POLYGON_DIR"
+#rm -rf "$BENCH_POLYGON_DIR"
     mkdir "$BENCH_POLYGON_DIR"
 
     log "Downloading Redis"
@@ -255,6 +263,7 @@ if [ "$COMPILE" = true ]; then
     for OPTION in $BUILD_OPTIONS
     do
         log "Building configuration: $OPTION"
+        rm -rf "$redis-$OPTION"
 
         # Rename the temporary TSan directory before the build
         rename_dir_with_suffix "$TSAN_TMP_DIR" "${TSAN_TMP_DIR}_redis_old"
