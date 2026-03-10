@@ -3,3 +3,5 @@ __results_redis__/*
 *.txt
 results*/*
 *.tar.gz
+old*
+redis-polygon*
