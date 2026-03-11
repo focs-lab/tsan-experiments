@@ -9,6 +9,7 @@ export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 # Select all or override with some specific scripts:
 SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
 #SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua"
+#SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua oltp_read_only.lua oltp_write_only.lua select_random_ranges.lua"
 
 
 export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
