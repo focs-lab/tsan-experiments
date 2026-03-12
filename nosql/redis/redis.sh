@@ -18,7 +18,7 @@ BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
 #------------------------------------------------------------------------------
 BENCH_POLYGON_DIR="$(pwd)/redis-polygon"     # Working directory for builds
 BENCH_ARCHIVE_NAME=$(basename "$BENCH_ARCHIVE_URL")
-SCRIPT_DIR=$(dirname $(realpath -s "$0"))
+SCRIPT_DIR=$(dirname "$(realpath -s "$0")")
 
 # Results and statistics directories
 RESULTS_DIR="__results_redis__"                # Main results directory
@@ -83,14 +83,47 @@ usage() {
     echo "By default (with no options), the script runs both compilation and tests."
 }
 
-if systemctl is-active --quiet redis-server; then
-    echo "Error: redis-server service is running. Aborting." >&2
-    exit 1
-fi
-
 # Print formatted log messages with arrow prefix
 log() {
     echo "==> $1"
+}
+
+stop_redis_servers() {
+    local pids
+    mapfile -t pids < <(pgrep -x redis-server)
+
+    if [ ${#pids[@]} -eq 0 ]; then
+        return 0
+    fi
+
+    log "Found running redis-server process(es): ${pids[*]}"
+    log "Stopping redis-server with SIGTERM"
+    kill -TERM "${pids[@]}" 2>/dev/null || true
+
+    local timeout=5
+    local remaining
+    while [ $timeout -gt 0 ]; do
+        mapfile -t remaining < <(pgrep -x redis-server)
+        if [ ${#remaining[@]} -eq 0 ]; then
+            log "redis-server stopped gracefully."
+            return 0
+        fi
+        sleep 1
+        timeout=$((timeout - 1))
+    done
+
+    log "redis-server is still running; escalating to SIGKILL for PID(s): ${remaining[*]}"
+    kill -KILL "${remaining[@]}" 2>/dev/null || true
+    sleep 1
+
+    mapfile -t remaining < <(pgrep -x redis-server)
+    if [ ${#remaining[@]} -eq 0 ]; then
+        log "redis-server stopped after SIGKILL."
+        return 0
+    fi
+
+    echo "Error: failed to stop redis-server process(es): ${remaining[*]}" >&2
+    return 1
 }
 
 # --- Argument Parsing ---
@@ -263,7 +296,7 @@ if [ "$COMPILE" = true ]; then
     for OPTION in $BUILD_OPTIONS
     do
         log "Building configuration: $OPTION"
-        rm -rf "$redis-$OPTION"
+        rm -rf "redis-$OPTION"
 
         # Rename the temporary TSan directory before the build
         rename_dir_with_suffix "$TSAN_TMP_DIR" "${TSAN_TMP_DIR}_redis_old"
@@ -333,6 +366,9 @@ fi
 
 
 if [ "$TESTS" = true ]; then
+    log "Checking for pre-existing redis-server processes before running benchmarks."
+    stop_redis_servers || exit 1
+
     if [ "$COMPILE" = false ]; then
         log "Switching to polygon directory for tests."
         if [ ! -d "$BENCH_POLYGON_DIR" ]; then
@@ -376,13 +412,15 @@ if [ "$TESTS" = true ]; then
 
     # --- Benchmark Loop ---
     BENCH_RESULTS_FILE="$RESULTS_DIR/results.txt"
-    > "$BENCH_RESULTS_FILE"
+    : > "$BENCH_RESULTS_FILE"
     for OPTION in $BUILD_OPTIONS
     do
         log "Testing $OPTION"
         echo "==> Testing $OPTION" >> "$BENCH_RESULTS_FILE"
         mkdir -p "$RESULTS_DIR/benchmarks"
-        
+
+        stop_redis_servers || exit 1
+
         if [ "$TRACE_MODE" = true ]; then
             TRACE_FILE="$TRACES_DIR/${OPTION}.trace"
             log "Redirecting trace output to ${TRACE_FILE}.zst"
@@ -418,14 +456,10 @@ if [ "$TESTS" = true ]; then
         run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}"
         run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}"
         
-        killall -9 redis-server
+        stop_redis_servers || exit 1
         sleep 5
 
-        if pgrep -x "redis-server" > /dev/null; then
-          echo "Error: redis-server is already running. Aborting execution." >&2
-          exit 1
-        fi
-        
+
         rm -f dump.rdb
     done
 fi
