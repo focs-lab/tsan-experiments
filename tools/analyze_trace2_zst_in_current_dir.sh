@@ -9,6 +9,27 @@ RESULTS_DIR="$TARGET_DIR/results"
 
 declare -a PIDS=()
 
+_total_cpus() {
+    if command -v nproc >/dev/null 2>&1; then
+        nproc
+    else
+        getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
+    fi
+}
+
+resolve_max_jobs() {
+    local jobs_value
+
+    jobs_value="${TRACE_ANALYZE_JOBS:-$(_total_cpus)}"
+
+    if ! [[ "$jobs_value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "Error: TRACE_ANALYZE_JOBS must be a positive integer, got '$jobs_value'." >&2
+        return 1
+    fi
+
+    echo "$jobs_value"
+}
+
 action_on_signal() {
     local pid
     echo
@@ -50,10 +71,16 @@ process_trace() {
 
 trap action_on_signal INT TERM
 
+if ! MAX_JOBS=$(resolve_max_jobs); then
+    exit 1
+fi
+
 echo "Searching for .zst traces in '$TARGET_DIR'..."
+echo "Running up to $MAX_JOBS analysis process(es) in parallel."
 
 found_any=0
 failed_any=0
+active_jobs=0
 
 while IFS= read -r -d '' zst_file; do
     if [ "$found_any" -eq 0 ]; then
@@ -63,6 +90,14 @@ while IFS= read -r -d '' zst_file; do
 
     process_trace "$zst_file" &
     PIDS+=("$!")
+    active_jobs=$((active_jobs + 1))
+
+    if [ "$active_jobs" -ge "$MAX_JOBS" ]; then
+        if ! wait -n; then
+            failed_any=1
+        fi
+        active_jobs=$((active_jobs - 1))
+    fi
 done < <(find "$TARGET_DIR" -maxdepth 1 -type f -name '*.zst' -print0)
 
 if [ "$found_any" -eq 0 ]; then
@@ -70,10 +105,11 @@ if [ "$found_any" -eq 0 ]; then
     exit 0
 fi
 
-for pid in "${PIDS[@]}"; do
-    if ! wait "$pid"; then
+while [ "$active_jobs" -gt 0 ]; do
+    if ! wait -n; then
         failed_any=1
     fi
+    active_jobs=$((active_jobs - 1))
 done
 
 echo
