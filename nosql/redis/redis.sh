@@ -440,12 +440,12 @@ if [ "$TESTS" = true ]; then
         prepare_trace_dirs || exit 1
         trap 'copy_traces_to_local || true' EXIT
 
-        REQ_GENERAL=$((REQ_GENERAL / 100))
-        REQ_LRANGE100=$((REQ_LRANGE100 / 100))
-        REQ_LRANGE300=$((REQ_LRANGE300 / 100))
-        REQ_LRANGE500=$((REQ_LRANGE500 / 100))
-        REQ_LRANGE600=$((REQ_LRANGE600 / 100))
-        REQ_MSET=$((REQ_MSET / 100))
+        REQ_GENERAL=$((REQ_GENERAL / 1000))
+        REQ_LRANGE100=$((REQ_LRANGE100 / 500))
+        REQ_LRANGE300=$((REQ_LRANGE300 / 500))
+        REQ_LRANGE500=$((REQ_LRANGE500 / 500))
+        REQ_LRANGE600=$((REQ_LRANGE600 / 500))
+        REQ_MSET=$((REQ_MSET / 500))
     fi
 
     # --- Benchmark Loop ---
