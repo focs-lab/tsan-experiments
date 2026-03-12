@@ -15,11 +15,11 @@ TESTS=(
 
 # List of Chrome builds to test
 #BUILDS=(chrome-orig chrome-tsan chrome-tsan-all chrome-tsan-dom chrome-tsan-ea chrome-tsan-lo chrome-tsan-stc chrome-tsan-swmr)
-BUILDS=(chrome-tsan chrome-tsan-all)
+BUILDS=(chrome-tsan chrome-tsan-all chrome-tsan-all-no-peeling)
 
 BENCHMARK_RUNNER="tools/perf/run_benchmark"
 TIME_BIN="/usr/bin/time"
-TSAN_EXTRA_OPTIONS="atexit_sleep_ms=200 flush_memory_ms=2000"
+TSAN_EXTRA_OPTIONS="atexit_sleep_ms=200 flush_memory_ms=2000 report_bugs=0"
 
 require_command() {
   if ! command -v "$1" > /dev/null 2>&1; then
