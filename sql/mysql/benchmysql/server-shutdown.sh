@@ -1,7 +1,25 @@
 source callmysql-export-main-vars.sh
 
+wait_for_pid_file() {
+	local PID_FILE="$1"
+	[ ! -f "$PID_FILE" ] && return 0
+
+	local WAIT_PID
+	WAIT_PID=$(cat "$PID_FILE")
+
+	if [[ "$WAIT_PID" =~ ^[0-9]+$ ]] && [ "$WAIT_PID" -ne 0 ]; then
+		echo "Waiting for launcher PID $WAIT_PID to exit..."
+		while [ -e "/proc/$WAIT_PID" ]; do
+			sleep 0.5
+		done
+	fi
+
+	rm -f "$PID_FILE"
+}
 
 $MYSQL_DIR/mysqladmin --user=root --socket=/tmp/mysql.sock shutdown 2> server-shutdown.stderr.log
+
+wait_for_pid_file "PID_trace_mysql_launched"
 
 if [ -f "PID_time_mysql_launched" ]; then
 	MYSQL_USR_BIN_TIME_PID=$(cat PID_time_mysql_launched)

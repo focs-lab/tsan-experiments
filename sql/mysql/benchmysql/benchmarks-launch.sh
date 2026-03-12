@@ -17,6 +17,9 @@ export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
 # Force using of VTune or `time`:
 INSCRIPT_BENCH_USE_VTUNE="false"
 INSCRIPT_BENCH_USE_TIME="false"
+INSCRIPT_BENCH_USE_TRACE="false"
+INSCRIPT_BENCH_TRACE_COMPRESSOR="zstd"
+INSCRIPT_BENCH_TRACE_DIR="trace_logs"
 
 
 # Select all or override with some specific builds:
@@ -30,6 +33,24 @@ logmessage() {
 	echo -e "\n  \e[94m$1\e[m  \n"
 }
 
+validate_trace_compressor() {
+	case "$1" in
+		"zstd"|"lz4"|"none") ;;
+		*)
+			echo "Wrong trace compressor '$1'. Expected one of: zstd, lz4, none."
+			exit 1
+			;;
+	esac
+}
+
+trace_suffix_for() {
+	case "$1" in
+		"zstd") echo "zst" ;;
+		"lz4") echo "lz4" ;;
+		"none") echo "log" ;;
+	esac
+}
+
 set -e
 
 export MYSQL_DIR="$MYSQL_BUILDS_DIR/$(echo $MYSQLBUILDLIST | tr ' ' '\n' | head -n1)/bin"
@@ -37,12 +58,17 @@ export MYSQL_DIR="$MYSQL_BUILDS_DIR/$(echo $MYSQLBUILDLIST | tr ' ' '\n' | head 
 
 export BENCH_USE_TIME=false
 export BENCH_USE_VTUNE=false
+export BENCH_USE_TRACE=false
+export BENCH_TRACE_COMPRESSOR="$INSCRIPT_BENCH_TRACE_COMPRESSOR"
+export BENCH_TRACE_DIR="$INSCRIPT_BENCH_TRACE_DIR"
 
 SYSBENCH_ALL_SCRIPTS="$(echo $SYSBENCH_ALL_SCRIPTS | xargs basename -a | grep -v oltp_common\.lua | xargs)"
 
 
 [ "$INSCRIPT_BENCH_USE_TIME" = "true" ] && export BENCH_USE_TIME=true
 [ "$INSCRIPT_BENCH_USE_VTUNE" = "true" ] && export BENCH_USE_VTUNE=true
+[ "$INSCRIPT_BENCH_USE_TRACE" = "true" ] && export BENCH_USE_TRACE=true
+validate_trace_compressor "$BENCH_TRACE_COMPRESSOR"
 BENCH_RUN_OPTION=false
 
 print_usage() {
@@ -51,6 +77,10 @@ print_usage() {
 	$0 -r|--run\t\t Run benchmarks
 	$0 -t|--time\t Add '/usr/bin/time' call to run
 	$0 --vtune\t\t Add VTune profiling to run
+	$0 --trace\t\t Capture mysqld trace to a per-run file
+	$0 --trace-raw\t\t Capture mysqld trace without compression
+	$0 --trace-dir DIR\t Directory for trace files (default: $INSCRIPT_BENCH_TRACE_DIR)
+	$0 --trace-compressor {zstd|lz4|none}\t Compression for trace files
 	$0 -h|--help\t Show this help"
 }
 
@@ -64,6 +94,37 @@ while [ -n "$1" ]; do
 		"--vtune")
 		    logmessage "VTune profiling will be enabled for runs."
 			export BENCH_USE_VTUNE=true
+			;;
+		"--trace")
+			logmessage "mysqld trace capture will be enabled for runs."
+			export BENCH_USE_TRACE=true
+			;;
+		"--trace-raw")
+			logmessage "mysqld trace capture will be enabled without compression."
+			export BENCH_USE_TRACE=true
+			export BENCH_TRACE_COMPRESSOR=none
+			;;
+		"--trace-dir")
+			shift || { echo "Missing value for --trace-dir"; exit 1; }
+			[ -z "$1" ] && { echo "Missing value for --trace-dir"; exit 1; }
+			export BENCH_TRACE_DIR="$1"
+			export BENCH_USE_TRACE=true
+			;;
+		"--trace-dir="*)
+			export BENCH_TRACE_DIR="${1#*=}"
+			[ -z "$BENCH_TRACE_DIR" ] && { echo "Missing value for --trace-dir"; exit 1; }
+			export BENCH_USE_TRACE=true
+			;;
+		"--trace-compressor")
+			shift || { echo "Missing value for --trace-compressor"; exit 1; }
+			validate_trace_compressor "$1"
+			export BENCH_TRACE_COMPRESSOR="$1"
+			export BENCH_USE_TRACE=true
+			;;
+		"--trace-compressor="*)
+			export BENCH_TRACE_COMPRESSOR="${1#*=}"
+			validate_trace_compressor "$BENCH_TRACE_COMPRESSOR"
+			export BENCH_USE_TRACE=true
 			;;
 		"--run"|"-r")
 			BENCH_RUN_OPTION=true
@@ -93,6 +154,9 @@ echo -e "\$MYSQLBUILDLIST:\n$MYSQLBUILDLIST\n"
 echo -e "\$SYSBENCH_ALL_SCRIPTS:\n$SYSBENCH_ALL_SCRIPTS\n"
 echo "Use /usr/bin/time : $BENCH_USE_TIME"
 echo "Use VTune         : $BENCH_USE_VTUNE"
+echo "Use trace capture : $BENCH_USE_TRACE"
+echo "Trace compressor  : $BENCH_TRACE_COMPRESSOR"
+echo "Trace dir         : $BENCH_TRACE_DIR"
 
 if [ "$BENCH_RUN_OPTION" != "true" ]; then
 	logmessage "Type \"\e[96m$0 --run\e[94m\" to launch the benchmarks!\n  Type \"\e[96m$0 --help\e[94m\" to get the full help."
@@ -109,6 +173,15 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 		export MYSQL_DIR="$MYSQL_BUILDS_DIR/$BUILD/bin"
 		export SYSBENCH_SCRIPT_FILENAME="$BENCHSCRIPT"
 		#export SYSBENCH_RUN_SECONDS=5
+
+		if [ "$BENCH_USE_TRACE" = "true" ]; then
+			mkdir -p "$BENCH_TRACE_DIR"
+			TRACE_SUFFIX=$(trace_suffix_for "$BENCH_TRACE_COMPRESSOR")
+			export BENCH_TRACE_OUTPUT_FILE="$BENCH_TRACE_DIR/${OUTPUT_FILE_NAME%.txt}.trace.$TRACE_SUFFIX"
+			echo "mysqld trace will be saved to $BENCH_TRACE_OUTPUT_FILE"
+		else
+			unset BENCH_TRACE_OUTPUT_FILE
+		fi
 
 		if [ "$BENCH_USE_VTUNE" = "true" ]; then
 			VTUNE_RESULT_DIR="vtune_results/${BUILD}_${BENCHSCRIPT%.lua}"
@@ -145,7 +218,7 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 			echo "No \"time.log\", so no resident memory peak size."
 		fi
 
-	done
+		done
 done
 
 ./bench-post-logs2csv.sh
