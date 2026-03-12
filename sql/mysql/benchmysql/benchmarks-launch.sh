@@ -7,9 +7,9 @@ export MYSQL_BUILDS_DIR=".."
 export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 
 # Select all or override with some specific scripts:
-SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
+#SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
 #SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua"
-#SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua oltp_read_only.lua oltp_write_only.lua select_random_ranges.lua"
+SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua oltp_read_only.lua oltp_write_only.lua select_random_ranges.lua select_random_points.lua"
 
 
 export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
@@ -23,6 +23,7 @@ INSCRIPT_BENCH_USE_TIME="false"
 #MYSQLBUILDLIST=$(echo "$MYSQLBUILDLIST" | sed "s/[,\n\t]/ /g" | sed "s/\s\s\+/ /g")
 MYSQLBUILDLIST=$(ls -d "$MYSQL_BUILDS_DIR"/mysql-tsan "$MYSQL_BUILDS_DIR"/mysql-tsan-* "$MYSQL_BUILDS_DIR"/mysql-orig | sed  -e "y/,\n\t/   /"  -e "s/\s\s\+/ /g"  -e "s/^\s//1" | xargs basename -a | xargs)
 #MYSQLBUILDLIST="mysql-orig mysql-tsan mysql-tsan-dom mysql-tsan-dom_peeling mysql-tsan-stmt"
+#MYSQLBUILDLIST="mysql-tsan mysql-tsan-dom mysql-tsan-dom_peeling mysql-tsan-stmt mysql-orig"
 
 
 logmessage() {

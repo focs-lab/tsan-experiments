@@ -1,0 +1,2 @@
+set -o pipefail
+./run_tests 2>&1 | zstd -T0 -3 -q -o trace.zst
