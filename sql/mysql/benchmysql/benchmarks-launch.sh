@@ -199,7 +199,10 @@ for BENCHSCRIPT in $SYSBENCH_ALL_SCRIPTS; do
 			echo "VTune results will be saved to $VTUNE_RESULT_DIR"
 		fi
 
-		[ ! -f "$MYSQL_DIR/mysqld" ] && logmessage "\e[93mNo MyQSL found at \"$MYSQL_DIR\", skipping." && continue
+		if [ ! -x "$MYSQL_DIR/mysqld" ]; then
+			logmessage "\e[93mNo executable MySQL server found at \"$MYSQL_DIR/mysqld\", skipping this build."
+			continue
+		fi
 
 		logmessage " ===== Started: $BUILD ===== "
 
