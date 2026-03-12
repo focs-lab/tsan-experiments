@@ -10,6 +10,7 @@ export SYSBENCH_SCRIPTS_DIR="/usr/share/sysbench"
 #SYSBENCH_ALL_SCRIPTS="$(ls $SYSBENCH_SCRIPTS_DIR/oltp_*.lua $SYSBENCH_SCRIPTS_DIR/select_random_*.lua)"
 #SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua"
 SYSBENCH_ALL_SCRIPTS="oltp_read_write.lua oltp_read_only.lua oltp_write_only.lua select_random_ranges.lua select_random_points.lua"
+TRACE_ONLY_SYSBENCH_SCRIPT="oltp_read_write.lua"
 
 
 export MYSQL_DATA_DIR="/tmp/mysql-benchmarks-datadir"
@@ -59,7 +60,7 @@ export MYSQL_DIR="$MYSQL_BUILDS_DIR/$(echo $MYSQLBUILDLIST | tr ' ' '\n' | head 
 export BENCH_USE_TIME=false
 export BENCH_USE_VTUNE=false
 export BENCH_USE_TRACE=false
-export BENCH_TRACE_COMPRESSOR="$INSCRIPT_BENCH_TRACE_COMPRESSOR"
+export BENCH_TRACE_COMPRESSOR="${INSCRIPT_BENCH_TRACE_COMPRESSOR:-zstd}"
 export BENCH_TRACE_DIR="$INSCRIPT_BENCH_TRACE_DIR"
 
 SYSBENCH_ALL_SCRIPTS="$(echo $SYSBENCH_ALL_SCRIPTS | xargs basename -a | grep -v oltp_common\.lua | xargs)"
@@ -68,6 +69,7 @@ SYSBENCH_ALL_SCRIPTS="$(echo $SYSBENCH_ALL_SCRIPTS | xargs basename -a | grep -v
 [ "$INSCRIPT_BENCH_USE_TIME" = "true" ] && export BENCH_USE_TIME=true
 [ "$INSCRIPT_BENCH_USE_VTUNE" = "true" ] && export BENCH_USE_VTUNE=true
 [ "$INSCRIPT_BENCH_USE_TRACE" = "true" ] && export BENCH_USE_TRACE=true
+BENCH_TRACE_COMPRESSOR="${BENCH_TRACE_COMPRESSOR:-zstd}"
 validate_trace_compressor "$BENCH_TRACE_COMPRESSOR"
 BENCH_RUN_OPTION=false
 
@@ -146,6 +148,11 @@ done
 if [[ "$BENCH_USE_TIME" == "true" && "$BENCH_USE_VTUNE" == "true" ]]; then
 	logmessage "\e[31mCannot use both --time and --vtune"
 	exit 1
+fi
+
+if [ "$BENCH_USE_TRACE" = "true" ]; then
+	BENCH_TRACE_COMPRESSOR="${BENCH_TRACE_COMPRESSOR:-zstd}"
+	SYSBENCH_ALL_SCRIPTS="$TRACE_ONLY_SYSBENCH_SCRIPT"
 fi
 
 
