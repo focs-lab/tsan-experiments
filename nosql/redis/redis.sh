@@ -22,7 +22,11 @@ SCRIPT_DIR=$(dirname "$(realpath -s "$0")")
 
 # Results and statistics directories
 RESULTS_DIR="__results_redis__"                # Main results directory
-TRACES_DIR="__traces_redis__"                  # Traces directory
+TRACES_DIR_BASE="__traces_redis__"             # Base name for local trace directories
+TRACES_DIR=""
+LOCAL_TRACES_DIR=""
+TRACE_RAM_ROOT="/dev/shm"
+TRACES_COPIED=false
 RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
 STATS_FILE="$RESULTS_DIR/instr_count.txt"
 TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary directory
@@ -86,6 +90,39 @@ usage() {
 # Print formatted log messages with arrow prefix
 log() {
     echo "==> $1"
+}
+
+prepare_trace_dirs() {
+    local timestamp
+    timestamp=$(date +%Y%m%d_%H%M%S)_$$
+
+    TRACES_DIR="$TRACE_RAM_ROOT/${TRACES_DIR_BASE}_${timestamp}"
+    LOCAL_TRACES_DIR="$(pwd)/${TRACES_DIR_BASE}_${timestamp}"
+
+    mkdir -p "$TRACES_DIR"
+
+    log "Trace files will be written to: $TRACES_DIR"
+    log "Trace files will be copied after tests to: $LOCAL_TRACES_DIR"
+}
+
+copy_traces_to_local() {
+    if [ "$TRACE_MODE" != true ] || [ "$TRACES_COPIED" = true ]; then
+        return 0
+    fi
+
+    if [ -z "$TRACES_DIR" ] || [ ! -d "$TRACES_DIR" ]; then
+        return 0
+    fi
+
+    mkdir -p "$LOCAL_TRACES_DIR"
+
+    if compgen -G "$TRACES_DIR/*" > /dev/null; then
+        cp -a "$TRACES_DIR"/. "$LOCAL_TRACES_DIR"/
+    fi
+
+    rm -rf "$TRACES_DIR"
+    TRACES_COPIED=true
+    log "Trace files copied to: $LOCAL_TRACES_DIR"
 }
 
 stop_redis_servers() {
@@ -400,7 +437,8 @@ if [ "$TESTS" = true ]; then
 
     if [ "$TRACE_MODE" = true ]; then
         log "Reducing benchmark load for trace mode."
-        mkdir -p "$TRACES_DIR"
+        prepare_trace_dirs || exit 1
+        trap 'copy_traces_to_local || true' EXIT
 
         REQ_GENERAL=$((REQ_GENERAL / 100))
         REQ_LRANGE100=$((REQ_LRANGE100 / 100))
@@ -462,6 +500,11 @@ if [ "$TESTS" = true ]; then
 
         rm -f dump.rdb
     done
+
+    if [ "$TRACE_MODE" = true ]; then
+        copy_traces_to_local || exit 1
+        trap - EXIT
+    fi
 fi
 
 log "Script finished successfully. All results are in $RESULTS_DIR"
