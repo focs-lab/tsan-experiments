@@ -2,17 +2,20 @@
 
 import sys
 
+MULTI_THREAD = -1
+SKIP_BYTE_STATS_FLAG = "--skip-byte-stats"
+
 
 def parse_trace_line(line: str):
     parts = line.split()
 
     if len(parts) == 5 and parts[0] == ">":
         _, pointer, size, access_type, thread = parts
-        return access_type, pointer, int(size), thread
+        return access_type, int(pointer, 16), int(size), thread
 
     if len(parts) == 6:
         _, operation, pointer, size, thread, _ = parts
-        return operation, pointer, int(size), thread
+        return operation, int(pointer, 16), int(size), thread
 
     return None
 
@@ -21,116 +24,112 @@ def ratio(part: int, total: int) -> float:
     return round(100 * part / total, 2) if total else 0.0
 
 
+def update_thread_state(states: dict[int, int], pointer: int, thread_id: int) -> tuple[bool, int]:
+    state = states.get(pointer)
+
+    if state is None:
+        states[pointer] = thread_id
+        return False, 0
+
+    if state == MULTI_THREAD:
+        return False, 1
+
+    if state == thread_id:
+        return False, 0
+
+    states[pointer] = MULTI_THREAD
+    return True, 2
+
+
+def print_byte_stats_skipped() -> None:
+    print()
+    print("Unique addresses (byte):   skipped")
+    print("Accesses (byte):           skipped")
+    print()
+    print("Addresses with multi-threaded access (byte):   skipped")
+    print("Multi-threaded accesses (byte):                skipped")
+
+
 def main() -> None:
 
-    if len(sys.argv) != 2:
-        print("Usage: trace-analyze.py <file>")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != SKIP_BYTE_STATS_FLAG):
+        print(f"Usage: trace-analyze2.py <file> [{SKIP_BYTE_STATS_FLAG}]")
         exit(1)
 
     log_file = sys.argv[1]
+    byte_stats_enabled = len(sys.argv) == 2
 
     print("Analyzing " + log_file)
 
-    access_types     = set()
-    pointers         = {}        # Key is a set of threads
-    pointers_byte    = {}        # Same as pointers, but every byte of access is tracked
-    threads          = set()
+    access_types = set()
+    pointer_states: dict[int, int] = {}
+    byte_pointer_states: dict[int, int] | None = {} if byte_stats_enabled else None
+    thread_ids: dict[str, int] = {}
 
-    access_multi = 0        # Count of accesses from different threads
-    access_total = 0        # Total count of accesses
+    access_multi = 0
+    access_total = 0
+    pointers_multi = 0
 
-    access_multi_byte = 0   # Same as access_multi, but taking every byte of range to account
-    access_total_byte = 0   # Same as access_total, but taking every byte of range to account
+    access_multi_byte = 0
+    access_total_byte = 0
+    pointers_multi_byte = 0
 
     with open(log_file) as log:
+        for line in log:
+            if not line.startswith(" > "):
+                continue
 
-        line = log.readline()
+            parsed = parse_trace_line(line)
+            if parsed is None:
+                continue
 
-        while line:
+            access_type, pointer, size, thread = parsed
 
-            if line.startswith(" > "):
+            access_types.add(access_type)
 
-                parsed = parse_trace_line(line)
-                if parsed is None:
-                    line = log.readline()
-                    continue
+            thread_id = thread_ids.get(thread)
+            if thread_id is None:
+                thread_id = len(thread_ids) + 1
+                thread_ids[thread] = thread_id
 
-                access_type, pointer, size, thread = parsed
+            became_multi, multi_increment = update_thread_state(pointer_states, pointer, thread_id)
+            if became_multi:
+                pointers_multi += 1
+            access_multi += multi_increment
+            access_total += 1
 
-                # Push operation/type to found operations
-                access_types.add(access_type)
+            if byte_pointer_states is not None:
+                access_total_byte += size
 
-                # Add pointer and associated thread
-                if pointer not in pointers:
-                    pointers[pointer] = set()
-
-                if thread not in pointers[pointer] and len(pointers[pointer]) == 1:
-                    access_multi += 1   # Accounting first access
-
-                pointers[pointer].add(thread)
-
-                # Increase count of multithreaded accesses
-                if len(pointers[pointer]) > 1:
-                    access_multi += 1
-
-                access_total += 1
-
-                start_pointer = int(pointer, 16)
-
-                # Add pointer and associated thread for every byte of access region
-                for byte_pointer in range(start_pointer, start_pointer + size):
-
-                    byte_pointer_hex = hex(byte_pointer)
-
-                    # Add pointer and associated thread
-                    if byte_pointer_hex not in pointers_byte:
-                        pointers_byte[byte_pointer_hex] = set()
-
-                    if thread not in pointers_byte[byte_pointer_hex] and len(pointers_byte[byte_pointer_hex]) == 1:
-                        access_multi_byte += 1   # Accounting first access
-
-                    pointers_byte[byte_pointer_hex].add(thread)
-
-                    # Increase count of multithreaded accesses
-                    if len(pointers_byte[byte_pointer_hex]) > 1:
-                        access_multi_byte += 1
-
-                    access_total_byte += 1
-
-                threads.add(thread)
-
-            line = log.readline()
+                for byte_pointer in range(pointer, pointer + size):
+                    became_multi_byte, multi_increment_byte = update_thread_state(byte_pointer_states, byte_pointer, thread_id)
+                    if became_multi_byte:
+                        pointers_multi_byte += 1
+                    access_multi_byte += multi_increment_byte
 
     print()
     print("Access types:              " + " ".join(sorted(access_types)))
-    print("Threads:                   " + str(len(threads)))
+    print("Threads:                   " + str(len(thread_ids)))
     print()
-    print("Unique addresses:          " + str(len(pointers)))
+    print("Unique addresses:          " + str(len(pointer_states)))
     print("Accesses:                  " + str(access_total))
     print()
-    print("Unique addresses (byte):   " + str(len(pointers_byte)))
+
+    if byte_pointer_states is None:
+        print_byte_stats_skipped()
+        return
+
+    print("Unique addresses (byte):   " + str(len(byte_pointer_states)))
     print("Accesses (byte):           " + str(access_total_byte))
 
-    pointers_multi = 0
-
-    for pointer in pointers:
-        if len(pointers[pointer]) > 1:
-            pointers_multi += 1
-
-    pointers_multi_ratio = ratio(pointers_multi, len(pointers))
+    pointers_multi_ratio = ratio(pointers_multi, len(pointer_states))
     access_multi_ratio = ratio(access_multi, access_total)
 
     print()
     print(f"Addresses with multi-threaded access:          {str(pointers_multi).ljust(10)} ({pointers_multi_ratio}% of total)")
     print(f"Multi-threaded accesses:                       {str(access_multi).ljust(10)} ({access_multi_ratio}% of total)")
 
-    pointers_multi_byte = 0
-
-    for pointer in pointers_byte:
-        if len(pointers_byte[pointer]) > 1:
-            pointers_multi_byte += 1
-
-    pointers_multi_byte_ratio = ratio(pointers_multi_byte, len(pointers_byte))
+    pointers_multi_byte_ratio = ratio(pointers_multi_byte, len(byte_pointer_states))
     access_multi_byte_ratio = ratio(access_multi_byte, access_total_byte)
 
     print()
