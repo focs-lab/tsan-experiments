@@ -36,14 +36,17 @@ def print_pretty_table(header, rows):
         print("No data to display.")
         return
 
+    normalized_rows = [
+        row[:len(header)] + [''] * max(0, len(header) - len(row))
+        for row in rows
+    ]
+
     # 1. Calculate the maximum width for each column
     col_widths = [len(h) for h in header]
-    for row in rows:
+    for row in normalized_rows:
         for i, cell in enumerate(row):
-            # Ensure we don't get an index error if a row has fewer columns
-            if i < len(col_widths):
-                if len(cell) > col_widths[i]:
-                    col_widths[i] = len(cell)
+            if len(cell) > col_widths[i]:
+                col_widths[i] = len(cell)
 
     # 2. Create the format string for the header and rows
     # Example: "| {:<15} | {:<25} | ..."
@@ -58,96 +61,154 @@ def print_pretty_table(header, rows):
     print(row_format.format(*header))
     print(separator)
 
-    for row in rows:
+    for row in normalized_rows:
         print(row_format.format(*row))
 
     print(separator)
 
 
+def build_sort_key(name):
+    """
+    Keep baseline configurations first, then sort the rest alphabetically.
+    """
+    if name == 'orig':
+        return (0, name)
+    if name == 'tsan':
+        return (1, name)
+    return (2, name)
+
+
+def format_ratio(numerator, denominator, zero_fallback='N/A'):
+    """
+    Formats a ratio as '<value>x' and handles zero-denominator edge cases.
+    """
+    if denominator > 0:
+        return f"{(numerator / denominator):.2f}x"
+    return "1.00x" if numerator == 0 else zero_fallback
+
+
+def load_summary_data(filepath):
+    """
+    Loads valid rows for summary generation and groups them by dataset and build.
+
+    Returns:
+        A tuple (grouped_data, skipped_rows).
+    """
+    grouped_data = {}
+    skipped_rows = []
+
+    with open(filepath, 'r', encoding='utf-8') as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError('CSV file is missing a header row.')
+
+        header = [h.strip() for h in reader.fieldnames]
+        total_col_name = 'Total ops' if 'Total ops' in header else 'Total'
+
+        required_columns = ['MySQL build', 'Sysbench script', 'Memory peak (kb)', total_col_name]
+        missing_columns = [column for column in required_columns if column not in header]
+        if missing_columns:
+            raise KeyError(f"Missing required column(s): {', '.join(missing_columns)}")
+
+        for line_number, row in enumerate(reader, start=2):
+            if not row or not any((value or '').strip() for value in row.values()):
+                continue
+
+            build = (row.get('MySQL build') or '').strip()
+            dataset = (row.get('Sysbench script') or '').strip()
+            total_raw = (row.get(total_col_name) or '').strip()
+            memory_raw = (row.get('Memory peak (kb)') or '').strip()
+
+            if not build or not dataset or not total_raw or not memory_raw:
+                skipped_rows.append(line_number)
+                continue
+
+            try:
+                total_ops = float(total_raw)
+                memory_peak = float(memory_raw)
+            except ValueError:
+                skipped_rows.append(line_number)
+                continue
+
+            grouped_data.setdefault(dataset, {})[build] = {
+                'Total': total_ops,
+                'Memory peak (kb)': memory_peak,
+            }
+
+    return grouped_data, skipped_rows
+
+
 def process_and_print_summary(filepath):
     """
-    Processes the CSV data to create a summary table with calculated metrics.
+    Processes the CSV data to create summary tables with calculated metrics per dataset.
     """
     print("\n\n--- Performance and Memory Summary ---\n")
-    
-    # Use DictReader for easy access to columns by name
+
     try:
-        with open(filepath, 'r', encoding='utf-8') as f:
-            reader = csv.DictReader(f)
-            # Find the correct column name for total operations, which might vary.
-            # We check for 'Total ops' first, then fall back to 'Total'.
-            # This is done by peeking at the header.
-            header = [h.strip() for h in reader.fieldnames]
-            total_col_name = 'Total ops' if 'Total ops' in header else 'Total'
-
-            # Go back to the start to read the data rows
-            f.seek(0)
-            next(reader) # Skip header row
-
-            data = {row['MySQL build'].strip(): {
-                        'Total': float(row[total_col_name].strip()),
-                        'Memory peak (kb)': float(row['Memory peak (kb)'].strip())
-                    } for row in reader if row and row.get('MySQL build')}
-    except (IOError, ValueError, KeyError, StopIteration) as e:
+        grouped_data, skipped_rows = load_summary_data(filepath)
+    except (IOError, ValueError, KeyError) as e:
         print(f"Error processing summary data: {e}", file=sys.stderr)
         return
 
-    orig_data = data.get('orig')
-    tsan_data = data.get('tsan')
+    if skipped_rows:
+        skipped_str = ', '.join(str(line_number) for line_number in skipped_rows)
+        print(f"Warning: skipped malformed summary rows at line(s): {skipped_str}", file=sys.stderr)
 
-    if not orig_data:
-        print("Error: 'orig' configuration not found. Cannot calculate Slowdown (SD).", file=sys.stderr)
+    if not grouped_data:
+        print("Error: no valid data rows found for summary generation.", file=sys.stderr)
         return
-    if not tsan_data:
-        print("Error: 'tsan' configuration not found. Cannot calculate Speedup (SU).", file=sys.stderr)
-        return
-        
-    orig_total = orig_data['Total']
-    tsan_total = tsan_data['Total']
-    orig_mem = orig_data['Memory peak (kb)']
-    tsan_mem = tsan_data['Memory peak (kb)']
 
-    # Prepare data for the new summary table
     summary_header = ['Configuration', 'Total ops', 'SD (Perf)', 'SU (Perf)', 'SD (Mem)', 'SU (Mem)']
-    summary_rows = []
+    printed_any_dataset = False
 
-    for name, values in sorted(data.items()):
-        total_ops = values['Total']
-        memory = values['Memory peak (kb)']
+    for dataset, data in grouped_data.items():
+        orig_data = data.get('orig')
+        tsan_data = data.get('tsan')
 
-        # --- Performance Metrics (Higher is better) ---
-        sd_perf_str = f"{(orig_total / total_ops):.2f}x" if total_ops > 0 else "N/A"
-        if name == 'orig':
-            su_perf_str = "N/A"
-        else:
-            su_perf_str = f"{(total_ops / tsan_total):.2f}x" if tsan_total > 0 else "N/A"
-            
-        # --- Memory Metrics (Lower is better) ---
-        # SD (Mem) = Overhead vs. 'orig'. Calculated as Mem_Config / Mem_Orig.
-        if orig_mem > 0:
-            sd_mem_str = f"{(memory / orig_mem):.2f}x"
-        else:
-            sd_mem_str = "1.00x" if memory == 0 else "Inf"
-        
-        # SU (Mem) = Reduction vs. 'tsan'. Calculated as Mem_TSan / Mem_Config.
-        if name == 'orig':
-            su_mem_str = "N/A"
-        elif memory > 0:
-            su_mem_str = f"{(tsan_mem / memory):.2f}x"
-        else:
-            su_mem_str = "1.00x" if tsan_mem == 0 else "Inf"
+        if not orig_data or not tsan_data:
+            missing = []
+            if not orig_data:
+                missing.append('orig')
+            if not tsan_data:
+                missing.append('tsan')
+            missing_str = ', '.join(missing)
+            print(
+                f"Warning: dataset '{dataset}' is missing baseline configuration(s): {missing_str}. Skipping.",
+                file=sys.stderr,
+            )
+            continue
 
-        summary_rows.append([
-            name,
-            f"{total_ops:.2f}",
-            sd_perf_str,
-            su_perf_str,
-            sd_mem_str,
-            su_mem_str
-        ])
-    
-    # Print the new table using the existing pretty-print function
-    print_pretty_table(summary_header, summary_rows)
+        orig_total = orig_data['Total']
+        tsan_total = tsan_data['Total']
+        orig_mem = orig_data['Memory peak (kb)']
+        tsan_mem = tsan_data['Memory peak (kb)']
+
+        summary_rows = []
+        for name, values in sorted(data.items(), key=lambda item: build_sort_key(item[0])):
+            total_ops = values['Total']
+            memory = values['Memory peak (kb)']
+
+            sd_perf_str = format_ratio(orig_total, total_ops)
+            su_perf_str = 'N/A' if name == 'orig' else format_ratio(total_ops, tsan_total)
+            sd_mem_str = format_ratio(memory, orig_mem, zero_fallback='Inf')
+            su_mem_str = 'N/A' if name == 'orig' else format_ratio(tsan_mem, memory, zero_fallback='Inf')
+
+            summary_rows.append([
+                name,
+                f"{total_ops:.2f}",
+                sd_perf_str,
+                su_perf_str,
+                sd_mem_str,
+                su_mem_str,
+            ])
+
+        print(f"Dataset: {dataset}")
+        print_pretty_table(summary_header, summary_rows)
+        print()
+        printed_any_dataset = True
+
+    if not printed_any_dataset:
+        print("Error: no dataset contained both 'orig' and 'tsan', so no summary tables were generated.", file=sys.stderr)
 
 
 def main():
