@@ -9,18 +9,10 @@ RESULTS_DIR="$TARGET_DIR/results"
 
 declare -a PIDS=()
 
-_total_cpus() {
-    if command -v nproc >/dev/null 2>&1; then
-        nproc
-    else
-        getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1
-    fi
-}
-
 resolve_max_jobs() {
     local jobs_value
 
-    jobs_value="${TRACE_ANALYZE_JOBS:-$(_total_cpus)}"
+    jobs_value="${TRACE_ANALYZE_JOBS:-1}"
 
     if ! [[ "$jobs_value" =~ ^[1-9][0-9]*$ ]]; then
         echo "Error: TRACE_ANALYZE_JOBS must be a positive integer, got '$jobs_value'." >&2
