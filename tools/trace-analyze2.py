@@ -3,6 +3,7 @@
 import sys
 
 MULTI_THREAD = -1
+BYTE_STATS_FLAG = "--byte-stats"
 SKIP_BYTE_STATS_FLAG = "--skip-byte-stats"
 
 
@@ -52,12 +53,12 @@ def print_byte_stats_skipped() -> None:
 
 def main() -> None:
 
-    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] != SKIP_BYTE_STATS_FLAG):
-        print(f"Usage: trace-analyze2.py <file> [{SKIP_BYTE_STATS_FLAG}]")
+    if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in (BYTE_STATS_FLAG, SKIP_BYTE_STATS_FLAG)):
+        print(f"Usage: trace-analyze2.py <file> [{BYTE_STATS_FLAG}]")
         exit(1)
 
     log_file = sys.argv[1]
-    byte_stats_enabled = len(sys.argv) == 2
+    byte_stats_enabled = len(sys.argv) == 3 and sys.argv[2] == BYTE_STATS_FLAG
 
     print("Analyzing " + log_file)
 
@@ -113,14 +114,11 @@ def main() -> None:
     print()
     print("Unique addresses:          " + str(len(pointer_states)))
     print("Accesses:                  " + str(access_total))
-    print()
 
-    if byte_pointer_states is None:
-        print_byte_stats_skipped()
-        return
-
-    print("Unique addresses (byte):   " + str(len(byte_pointer_states)))
-    print("Accesses (byte):           " + str(access_total_byte))
+    if byte_pointer_states is not None:
+        print()
+        print("Unique addresses (byte):   " + str(len(byte_pointer_states)))
+        print("Accesses (byte):           " + str(access_total_byte))
 
     pointers_multi_ratio = ratio(pointers_multi, len(pointer_states))
     access_multi_ratio = ratio(access_multi, access_total)
@@ -128,6 +126,10 @@ def main() -> None:
     print()
     print(f"Addresses with multi-threaded access:          {str(pointers_multi).ljust(10)} ({pointers_multi_ratio}% of total)")
     print(f"Multi-threaded accesses:                       {str(access_multi).ljust(10)} ({access_multi_ratio}% of total)")
+
+    if byte_pointer_states is None:
+        print_byte_stats_skipped()
+        return
 
     pointers_multi_byte_ratio = ratio(pointers_multi_byte, len(byte_pointer_states))
     access_multi_byte_ratio = ratio(access_multi_byte, access_total_byte)
