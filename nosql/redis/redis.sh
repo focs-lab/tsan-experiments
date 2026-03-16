@@ -16,11 +16,9 @@ BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
 #------------------------------------------------------------------------------
 # Directory and File Paths
 #------------------------------------------------------------------------------
-BENCH_POLYGON_DIR="$(pwd)/redis-polygon"     # Working directory for builds
-BENCH_ARCHIVE_NAME=$(basename "$BENCH_ARCHIVE_URL")
 SCRIPT_DIR=$(dirname "$(realpath -s "$0")")
-
-# Results and statistics directories
+BENCH_POLYGON_DIR="$SCRIPT_DIR/redis-polygon"     # Working directory for builds
+BENCH_ARCHIVE_NAME=$(basename "$BENCH_ARCHIVE_URL")
 RESULTS_DIR="__results_redis__"                # Main results directory
 TRACES_DIR_BASE="__traces_redis__"             # Base name for local trace directories
 TRACES_DIR=""
@@ -41,7 +39,7 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 #BUILD_OPTIONS="orig tsan dom ea lo st swmr dom-ea-lo-st-swmr"
 #BUILD_OPTIONS="orig tsan dom dom_peeling"
 #BUILD_OPTIONS="tsan tsan_no_atomics"
-#BUILD_OPTIONS="orig tsan dom ea lo st swmr dom_peeling-ea-lo-st-swmr-stmt stmt dom_peeling"
+#BUILD_OPTIONS="orig tsan dom ea lo st swmr dom_peeling-ea-lo-st-swmr-stmt dom_peeling"
 
 #BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr stmt dom_peeling"
 #BUILD_OPTIONS="tsan"
@@ -234,9 +232,33 @@ rename_dir_with_suffix() {
   fi
 }
 
+ensure_executable() {
+    local path="$1"
+    local description="$2"
+
+    if [ -x "$path" ]; then
+        return 0
+    fi
+
+    echo "Error: $description is missing or not executable: $path" >&2
+    return 1
+}
+
+ensure_built_variant() {
+    local option="$1"
+    local server_bin="redis-$option/src/redis-server"
+
+    if [ -x "$server_bin" ]; then
+        return 0
+    fi
+
+    echo "Error: missing built redis-server for '$option': $server_bin" >&2
+    echo "Hint: rerun without --test-only to rebuild, or inspect $RESULTS_DIR/build-$option.log if it exists." >&2
+    return 1
+}
 
 function build_single_ll {
-    SANITIZER=thread USE_JEMALLOC=no make -j $(nproc) > /dev/null 2>&1
+    SANITIZER=thread USE_JEMALLOC=no make -j "$(nproc)" > /dev/null 2>&1
 
     for MODULE in "adlist" "quicklist" "ae" "anet" "dict" "server" "sds" "zmalloc" "lzf_c" "lzf_d" "pqsort" \
                   "zipmap" "sha1" "ziplist" "release" "networking" "util" "object" "db" "replication" "rdb" \
@@ -255,21 +277,40 @@ function build_single_ll {
             -DHAVE_LIBSYSTEMD -MMD -S -emit-llvm -o "$MODULE.ll" "$MODULE.c" > /dev/null 2>&1 &
     done
 
-    wait `jobs -p`
+    wait
 
     llvm-link -S -o redis-server.ll *.ll
 }
 
 function run {
-    FILE="$1"
-    TEST="$2"
-    REQUESTS="$3"
+    local FILE="$1"
+    local TEST="$2"
+    local REQUESTS="$3"
+    local output
+    local status
+    local throughput
 
     echo -n "$TEST " | tee -a "$FILE"
-    redis-benchmark/src/redis-benchmark \
+    output=$(redis-benchmark/src/redis-benchmark \
         -P 1024 \
         -n "$REQUESTS" \
-        -t "$TEST" | grep throughput | tail -1 | awk '{print $3}' | tee -a "$FILE"
+        -t "$TEST" 2>&1)
+    status=$?
+
+    if [ $status -ne 0 ]; then
+        printf '%s\n' "$output" >&2
+        echo "" | tee -a "$FILE"
+        return $status
+    fi
+
+    throughput=$(printf '%s\n' "$output" | grep throughput | tail -1 | awk '{print $3}')
+    if [ -z "$throughput" ]; then
+        printf '%s\n' "$output" >&2
+        echo "" | tee -a "$FILE"
+        return 1
+    fi
+
+    echo "$throughput" | tee -a "$FILE"
 }
 
 # --- Main Script ---
@@ -277,10 +318,11 @@ function run {
 if [ "$COMPILE" = true ]; then
     log "Creating Redis polygon"
 #rm -rf "$BENCH_POLYGON_DIR"
-    mkdir "$BENCH_POLYGON_DIR"
+    mkdir -p "$BENCH_POLYGON_DIR"
 
     log "Downloading Redis"
-    cd "$BENCH_POLYGON_DIR"
+    cd "$BENCH_POLYGON_DIR" || exit 1
+    mkdir -p "$RESULTS_DIR"
     wget "$BENCH_ARCHIVE_URL" 2> /dev/null
     BENCH_ARCHIVE_DIR=$(tar --list --file "$BENCH_ARCHIVE_NAME" | head -1)
 
@@ -289,8 +331,13 @@ if [ "$COMPILE" = true ]; then
     mv "$BENCH_ARCHIVE_DIR" redis-benchmark
 
     log "Building redis-benchmark"
-    cd redis-benchmark/src
-    make -j $(nproc) redis-benchmark #> /dev/null 2>&1
+    cd redis-benchmark/src || exit 1
+    REDIS_BENCHMARK_BUILD_LOG="../../$RESULTS_DIR/build-redis-benchmark.log"
+    if ! make -j "$(nproc)" redis-benchmark > "$REDIS_BENCHMARK_BUILD_LOG" 2>&1; then
+        echo "Error: failed to build redis-benchmark. See $REDIS_BENCHMARK_BUILD_LOG" >&2
+        exit 1
+    fi
+    ensure_executable redis-benchmark redis-benchmark || exit 1
     cd ../..
 
     if [[ -d "$SCRIPT_DIR/summaries" ]]
@@ -301,24 +348,24 @@ if [ "$COMPILE" = true ]; then
         log "Building a single LL"
         tar --extract --file "$BENCH_ARCHIVE_NAME"
         mv "$BENCH_ARCHIVE_DIR" redis-single-ll
-        cd redis-single-ll/src
+        cd redis-single-ll/src || exit 1
         build_single_ll
         cd ../..
 
         log "Building summaries (may take a long time)"
         mkdir summaries
-        cd summaries
+        cd summaries || exit 1
         mkdir single-threaded lock-ownership escape-analysis-global
         cp ../redis-single-ll/src/redis-server.ll single-threaded
         cp ../redis-single-ll/src/redis-server.ll lock-ownership
         cp ../redis-single-ll/src/redis-server.ll escape-analysis-global
-        cd single-threaded
+        cd single-threaded || exit 1
         opt -S -disable-output -passes='print<single-threaded>' -debug-only=single-threaded redis-server.ll 2> /dev/null &
-        cd ../lock-ownership
+        cd ../lock-ownership || exit 1
         opt -S -disable-output -passes='print<lock-ownership>' -debug-only=lock-ownership redis-server.ll 2> /dev/null &
-        cd ../escape-analysis-global
+        cd ../escape-analysis-global || exit 1
         opt -S -disable-output -passes='print<escape-analysis-global>' -debug-only=ea-escaping-callees redis-server.ll 2> /dev/null &
-        wait `jobs -p`
+        wait
         cd ../..
     fi
 
@@ -347,17 +394,24 @@ if [ "$COMPILE" = true ]; then
 
         tar --extract --file "$BENCH_ARCHIVE_NAME"
         mv "$BENCH_ARCHIVE_DIR" "redis-$OPTION"
-        cd "redis-$OPTION"/src
+        cd "redis-$OPTION"/src || exit 1
 
         start_time=$SECONDS
+        BUILD_LOG="../../$RESULTS_DIR/build-$OPTION.log"
 
         if [[ "$OPTION" = "orig" ]]
         then
             log "Building orig"
-            USE_JEMALLOC=no make redis-server -j $(nproc) #> /dev/null 2>&1
+            if ! USE_JEMALLOC=no make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
+                echo "Error: build failed for '$OPTION'. See $BUILD_LOG" >&2
+                exit 1
+            fi
         elif [[ "$OPTION" = "tsan" ]]
         then
-            SANITIZER=thread USE_JEMALLOC=no make redis-server -j $(nproc) > /dev/null 2>&1
+            if ! SANITIZER=thread USE_JEMALLOC=no make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
+                echo "Error: build failed for '$OPTION'. See $BUILD_LOG" >&2
+                exit 1
+            fi
         else
             [ -d "../../summaries/escape-analysis-global/ea-logs" ] && \
               cp -r ../../summaries/escape-analysis-global/ea-logs .
@@ -382,8 +436,13 @@ if [ "$COMPILE" = true ]; then
             [[ "$OPTION" == *"dom_peeling"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
 
             log "Building $OPTION"
-            SANITIZER=thread USE_JEMALLOC=no CFLAGS="$TSAN_FLAGS" make redis-server -j $(nproc) #> /dev/null 2>&1
+            if ! SANITIZER=thread USE_JEMALLOC=no CFLAGS="$TSAN_FLAGS" make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
+                echo "Error: build failed for '$OPTION'. See $BUILD_LOG" >&2
+                exit 1
+            fi
         fi
+
+        ensure_executable redis-server "redis-server for '$OPTION'" || { echo "Hint: build log is $BUILD_LOG" >&2; exit 1; }
 
         duration=$(( SECONDS - start_time ))
         log "Finished building '$OPTION' in $duration seconds."
@@ -418,8 +477,10 @@ if [ "$TESTS" = true ]; then
             log "Run the script without --test-only first to create the builds."
             exit 1
         fi
-        cd "$BENCH_POLYGON_DIR" || exit
+        cd "$BENCH_POLYGON_DIR" || exit 1
     fi
+
+    ensure_executable "redis-benchmark/src/redis-benchmark" "redis-benchmark" || exit 1
 
     # A simple check to see if builds might be present
     if [ ! -d "redis-orig" ]; then
@@ -465,14 +526,16 @@ if [ "$TESTS" = true ]; then
         mkdir -p "$RESULTS_DIR/benchmarks"
 
         stop_redis_servers || exit 1
+        ensure_built_variant "$OPTION" || exit 1
+        SERVER_BIN="redis-$OPTION/src/redis-server"
 
         if [ "$TRACE_MODE" = true ]; then
             TRACE_FILE="$TRACES_DIR/${OPTION}.trace"
             log "Redirecting trace output to ${TRACE_FILE}.zst"
-            "redis-$OPTION/src/redis-server" redis.conf 2>&1 | zstd -1 -o "${TRACE_FILE}.zst" &
+            "$SERVER_BIN" redis.conf 2>&1 | zstd -1 -o "${TRACE_FILE}.zst" &
         else
             echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
-            /usr/bin/time --verbose "redis-$OPTION/src/redis-server" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
+            /usr/bin/time --verbose "$SERVER_BIN" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
         fi
         
         sleep 5
@@ -480,32 +543,30 @@ if [ "$TESTS" = true ]; then
         # For 'orig' build, append "0" to request count, effectively multiplying it by 10.
         [[ "$OPTION" = "orig" ]] && L="0" || L=""
         
-        run "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" SADD        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" HSET        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_LPUSH}${L}"
+        run "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" SADD        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" HSET        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}" || exit 1
+        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_LPUSH}${L}" || exit 1
         if [ "$TRACE_MODE" = false ]; then
-          run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}"
-          run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}"
-          run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}"
-          run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}"
-          run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}"
+          run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}" || exit 1
+          run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}" || exit 1
+          run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}" || exit 1
+          run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}" || exit 1
+          run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}" || exit 1
         fi
         
         stop_redis_servers || exit 1
         sleep 5
-
-
         rm -f dump.rdb
     done
 
@@ -517,5 +578,7 @@ fi
 
 log "Script finished successfully. All results are in $RESULTS_DIR"
 
-cd $LOCAL_TRACES_DIR
-analyze_trace2_zst_in_current_dir.sh
+if [ "$TRACE_MODE" = true ] && [ -n "$LOCAL_TRACES_DIR" ]; then
+    cd "$LOCAL_TRACES_DIR" || exit 1
+    analyze_trace2_zst_in_current_dir.sh
+fi
