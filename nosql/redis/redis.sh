@@ -47,8 +47,13 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 #BUILD_OPTIONS="tsan"
 #BUILD_OPTIONS="orig tsan dom dom_peeling ea lo st swmr stmt dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr"
 
-BUILD_OPTIONS="orig tsan dom dom_peeling dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr"
+#BUILD_OPTIONS="orig tsan dom dom_peeling dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr"
 #BUILD_OPTIONS="orig tsan"
+
+# For tracing
+#BUILD_OPTIONS="tsan ea-lo-st-swmr-stmt ea-lo-st-swmr dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt"
+BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt ea-lo-st-swmr-stmt ea-lo-st-swmr"
+#BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt"
 
 #BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
 #    st dom-st ea-st dom-ea-st lo-st dom-lo-st ea-lo-st dom-ea-lo-st \
@@ -145,13 +150,13 @@ stop_redis_servers() {
             log "redis-server stopped gracefully."
             return 0
         fi
-        sleep 1
+        sleep 5
         timeout=$((timeout - 1))
     done
 
     log "redis-server is still running; escalating to SIGKILL for PID(s): ${remaining[*]}"
     kill -KILL "${remaining[@]}" 2>/dev/null || true
-    sleep 1
+    sleep 5
 
     mapfile -t remaining < <(pgrep -x redis-server)
     if [ ${#remaining[@]} -eq 0 ]; then
@@ -429,6 +434,7 @@ if [ "$TESTS" = true ]; then
 
     # --- Benchmark Settings ---
     REQ_GENERAL=1000000
+    REQ_LPUSH=1000000
     REQ_LRANGE100=50000
     REQ_LRANGE300=10000
     REQ_LRANGE500=5000
@@ -440,12 +446,13 @@ if [ "$TESTS" = true ]; then
         prepare_trace_dirs || exit 1
         trap 'copy_traces_to_local || true' EXIT
 
-        REQ_GENERAL=$((REQ_GENERAL / 1000))
-        REQ_LRANGE100=$((REQ_LRANGE100 / 500))
-        REQ_LRANGE300=$((REQ_LRANGE300 / 500))
-        REQ_LRANGE500=$((REQ_LRANGE500 / 500))
-        REQ_LRANGE600=$((REQ_LRANGE600 / 500))
-        REQ_MSET=$((REQ_MSET / 500))
+        REQ_GENERAL=$((REQ_GENERAL / 50000))
+        REQ_LPUSH=$((REQ_LPUSH / 500000))
+        REQ_LRANGE100=$((REQ_LRANGE100 / 5000))
+        REQ_LRANGE300=$((REQ_LRANGE300 / 1000))
+        REQ_LRANGE500=$((REQ_LRANGE500 / 1000))
+        REQ_LRANGE600=$((REQ_LRANGE600 / 1000))
+        REQ_MSET=$((REQ_MSET / 1000))
     fi
 
     # --- Benchmark Loop ---
@@ -478,7 +485,6 @@ if [ "$TESTS" = true ]; then
         run "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}"
@@ -487,12 +493,14 @@ if [ "$TESTS" = true ]; then
         run "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}"
         run "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_GENERAL}${L}"
-        run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}"
-        run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}"
-        run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}"
-        run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}"
-        run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}"
+        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_LPUSH}${L}"
+        if [ "$TRACE_MODE" = false ]; then
+          run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}"
+          run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}"
+          run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}"
+          run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}"
+          run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}"
+        fi
         
         stop_redis_servers || exit 1
         sleep 5
@@ -508,3 +516,6 @@ if [ "$TESTS" = true ]; then
 fi
 
 log "Script finished successfully. All results are in $RESULTS_DIR"
+
+cd $LOCAL_TRACES_DIR
+analyze_trace2_zst_in_current_dir.sh
