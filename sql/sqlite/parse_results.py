@@ -2,6 +2,7 @@
 
 import os
 import re
+import math
 from collections import defaultdict
 import glob
 
@@ -83,6 +84,17 @@ def parse_log_file(filepath):
     # Remove tests that did not yield a numerical metric
     #return {k: v for k, v in results.items() if v != 0.0 or k == 'walthread5'}
     return {k: v for k, v in results.items() if v != 0.0}
+
+
+def geometric_mean(values):
+    """
+    Returns the geometric mean of positive values, or None if there are no such values.
+    """
+    positive_values = [v for v in values if v is not None and v > 0]
+    if not positive_values:
+        return None
+
+    return math.exp(sum(math.log(v) for v in positive_values) / len(positive_values))
 
 
 def generate_comparison_tables(all_data):
@@ -177,38 +189,47 @@ def generate_comparison_tables(all_data):
 
 def generate_contention_tables(contention_data):
     """
-    Builds and prints tables for the walthread1 contention experiment.
+    Builds and prints tables for the contention experiment.
     """
     if not contention_data:
         return
 
-    print("\n--- Table 3: walthread1 Contention Analysis (Slowdown vs. 'orig') ---")
-
     non_instr_conf_name = 'orig'
     tsan_conf_name = 'tsan'
 
-    # Get all unique thread counts and sort them
-    all_threads = sorted(list(set(thread for data in contention_data.values() for thread in data.keys())))
-    # Get all unique config names
-    all_configs = sorted(contention_data.keys())
+    # contention_data shape: {threads: {config: {test_name: value}}}
+    all_threads = sorted(contention_data.keys())
+    all_configs = sorted(list(set(
+        config
+        for thread_results in contention_data.values()
+        for config in thread_results.keys()
+    )))
+    all_tests = sorted(list(set(
+        test_name
+        for thread_results in contention_data.values()
+        for config_results in thread_results.values()
+        for test_name in config_results.keys()
+    )))
+    config_col_width = max(20, max(len(name) for name in all_configs) + 2)
+
+    print("\n--- Table 3: walthread1 Contention Analysis (Slowdown vs. 'orig') ---")
 
     # --- Table 1: Slowdown vs. Non-Instrumented Baseline ---
     if non_instr_conf_name not in all_configs:
         print(f"\nWarning: Non-instrumented baseline '{non_instr_conf_name}' not found for contention tests. Skipping slowdown table.")
     else:
-        baseline_results = contention_data[non_instr_conf_name]
         configs_to_compare = [name for name in all_configs if name != non_instr_conf_name]
 
-        header = f"{'Config':<20}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
+        header = f"{'Config':<{config_col_width}}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
         print(header)
         print("-" * len(header))
 
         for config in configs_to_compare:
-            row = [f"{config:<20}"]
-            config_results = contention_data.get(config, {})
+            row = [f"{config:<{config_col_width}}"]
             for thread_count in all_threads:
-                baseline_val = baseline_results.get(thread_count)
-                val = config_results.get(thread_count)
+                thread_results = contention_data.get(thread_count, {})
+                baseline_val = thread_results.get(non_instr_conf_name, {}).get('walthread1')
+                val = thread_results.get(config, {}).get('walthread1')
                 cell_str = "N/A"
                 if val is not None and baseline_val is not None and val > 0:
                     slowdown = baseline_val / val
@@ -223,7 +244,6 @@ def generate_contention_tables(contention_data):
     if tsan_conf_name not in all_configs:
         print(f"\nWarning: TSan baseline '{tsan_conf_name}' not found for contention tests. Skipping speedup table.")
     else:
-        tsan_baseline_results = contention_data[tsan_conf_name]
         # Compare only configs starting with 'tsan-' but are not the baseline itself
         tsan_configs_to_compare = [
             name for name in all_configs if name.startswith(tsan_conf_name + '-')
@@ -233,16 +253,16 @@ def generate_contention_tables(contention_data):
             print("No optimized TSan configurations (e.g., 'tsan-*') found for contention tests.")
             return
 
-        header = f"{'Config':<20}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
+        header = f"{'Config':<{config_col_width}}" + "".join([f"{str(t) + ' threads':<25}" for t in all_threads])
         print(header)
         print("-" * len(header))
 
         for config in tsan_configs_to_compare:
-            row = [f"{config:<20}"]
-            config_results = contention_data.get(config, {})
+            row = [f"{config:<{config_col_width}}"]
             for thread_count in all_threads:
-                tsan_baseline_val = tsan_baseline_results.get(thread_count)
-                val = config_results.get(thread_count)
+                thread_results = contention_data.get(thread_count, {})
+                tsan_baseline_val = thread_results.get(tsan_conf_name, {}).get('walthread1')
+                val = thread_results.get(config, {}).get('walthread1')
                 cell_str = "N/A"
 
                 if val is not None and tsan_baseline_val is not None and tsan_baseline_val > 0:
@@ -252,6 +272,75 @@ def generate_contention_tables(contention_data):
                     cell_str = f"{int(val):,}"
 
                 row.append(f"{cell_str:<25}")
+            print("".join(row))
+
+    print(f"\n--- Table 5: Contention Cumulative Geomean (Slowdown vs. '{non_instr_conf_name}' by thread count) ---")
+    if non_instr_conf_name not in all_configs:
+        print(f"\nWarning: Non-instrumented baseline '{non_instr_conf_name}' not found for contention tests. Skipping cumulative slowdown table.")
+    else:
+        configs_to_compare = [name for name in all_configs if name != non_instr_conf_name]
+        summary_col_width = max(20, max(len(name) for name in configs_to_compare) + 2)
+        header = f"{'Threads':<12}" + "".join([f"{name:<{summary_col_width}}" for name in configs_to_compare])
+        print(header)
+        print("-" * len(header))
+
+        for thread_count in all_threads:
+            thread_results = contention_data.get(thread_count, {})
+            baseline_results = thread_results.get(non_instr_conf_name, {})
+            row = [f"{thread_count:<12}"]
+
+            for config in configs_to_compare:
+                config_results = thread_results.get(config, {})
+                slowdown_values = []
+
+                for test_name in all_tests:
+                    baseline_val = baseline_results.get(test_name)
+                    config_val = config_results.get(test_name)
+                    if baseline_val is not None and baseline_val > 0 and config_val is not None and config_val > 0:
+                        slowdown_values.append(baseline_val / config_val)
+
+                geomean = geometric_mean(slowdown_values)
+                cell_str = f"{geomean:.2f}x" if geomean is not None else "N/A"
+                row.append(f"{cell_str:<{summary_col_width}}")
+
+            print("".join(row))
+
+    print(f"\n--- Table 6: Contention Cumulative Geomean (Speedup vs. '{tsan_conf_name}' by thread count) ---")
+    if tsan_conf_name not in all_configs:
+        print(f"\nWarning: TSan baseline '{tsan_conf_name}' not found for contention tests. Skipping cumulative speedup table.")
+    else:
+        tsan_configs_to_compare = [
+            name for name in all_configs if name.startswith(tsan_conf_name + '-')
+        ]
+
+        if not tsan_configs_to_compare:
+            print("No optimized TSan configurations (e.g., 'tsan-*') found for contention tests.")
+            return
+
+        summary_col_width = max(20, max(len(name) for name in tsan_configs_to_compare) + 2)
+        header = f"{'Threads':<12}" + "".join([f"{name:<{summary_col_width}}" for name in tsan_configs_to_compare])
+        print(header)
+        print("-" * len(header))
+
+        for thread_count in all_threads:
+            thread_results = contention_data.get(thread_count, {})
+            tsan_baseline_results = thread_results.get(tsan_conf_name, {})
+            row = [f"{thread_count:<12}"]
+
+            for config in tsan_configs_to_compare:
+                config_results = thread_results.get(config, {})
+                speedup_values = []
+
+                for test_name in all_tests:
+                    tsan_baseline_val = tsan_baseline_results.get(test_name)
+                    config_val = config_results.get(test_name)
+                    if tsan_baseline_val is not None and tsan_baseline_val > 0 and config_val is not None and config_val > 0:
+                        speedup_values.append(config_val / tsan_baseline_val)
+
+                geomean = geometric_mean(speedup_values)
+                cell_str = f"{geomean:.2f}x" if geomean is not None else "N/A"
+                row.append(f"{cell_str:<{summary_col_width}}")
+
             print("".join(row))
 
 
@@ -266,7 +355,7 @@ def main():
         return
 
     all_data = {}
-    # Data for walthread1 contention tests: {'config': {threads: value}}
+    # Data for contention tests: {threads: {config: {test_name: value}}}
     contention_data = defaultdict(dict)
 
     # Regex to identify contention experiment files, e.g., "tsan-ea_7threads.log"
@@ -285,8 +374,8 @@ def main():
 
             print(f"Parsing contention file: {f} (config: {conf_name}, threads: {threads})")
             parsed = parse_log_file(f)
-            if 'walthread1' in parsed:
-                contention_data[conf_name][threads] = parsed['walthread1']
+            if parsed:
+                contention_data[threads][conf_name] = parsed
         else:
             # This is a regular experiment file
             conf_name = base_name
