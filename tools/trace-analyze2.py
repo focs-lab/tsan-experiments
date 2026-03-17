@@ -82,6 +82,25 @@ def print_byte_stats_skipped() -> None:
     print("Multi-threaded accesses (byte):                skipped")
 
 
+def print_trace_accounting(access_total: int, trace_lines: int, malformed_trace_lines: int) -> None:
+    valid_trace_lines = trace_lines - malformed_trace_lines
+    access_delta = access_total - valid_trace_lines
+    trace_delta = trace_lines - (valid_trace_lines + malformed_trace_lines)
+
+    print("Valid trace lines:         " + str(valid_trace_lines))
+    print("Rejected trace lines:      " + str(malformed_trace_lines))
+
+    if access_delta == 0:
+        print("Access accounting:         ok (Accesses == valid trace lines)")
+    else:
+        print(f"Access accounting:         mismatch (Accesses - valid trace lines = {access_delta})")
+
+    if trace_delta == 0:
+        print("Trace line accounting:     ok (seen == valid + rejected)")
+    else:
+        print(f"Trace line accounting:     mismatch (seen - (valid + rejected) = {trace_delta})")
+
+
 def print_malformed_line_stats(
     total_lines: int,
     trace_lines: int,
@@ -196,6 +215,7 @@ def main() -> None:
     print()
     print("Unique addresses:          " + str(len(pointer_states)))
     print("Accesses:                  " + str(access_total))
+    print_trace_accounting(access_total, trace_lines, malformed_trace_lines)
 
     if byte_pointer_states is not None:
         print()
