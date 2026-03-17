@@ -1,24 +1,55 @@
 #!/usr/bin/env python3
 
+from collections import Counter
 import sys
 
 MULTI_THREAD = -1
 BYTE_STATS_FLAG = "--byte-stats"
 SKIP_BYTE_STATS_FLAG = "--skip-byte-stats"
+MALFORMED_LINE_EXAMPLES_LIMIT = 5
 
 
-def parse_trace_line(line: str):
+def parse_non_negative_int(value: str, base: int = 10) -> int | None:
+    try:
+        parsed = int(value, base)
+    except ValueError:
+        return None
+
+    if parsed < 0:
+        return None
+
+    return parsed
+
+
+def parse_trace_line(line: str) -> tuple[tuple[str, int, int, int] | None, str | None]:
     parts = line.split()
 
-    if len(parts) == 5 and parts[0] == ">":
-        _, pointer, size, access_type, thread = parts
-        return access_type, int(pointer, 16), int(size), thread
+    if not parts:
+        return None, "empty trace line"
 
-    if len(parts) == 6:
-        _, operation, pointer, size, thread, _ = parts
-        return operation, int(pointer, 16), int(size), thread
+    if parts[0] != ">":
+        return None, "missing trace marker"
 
-    return None
+    if len(parts) == 5:
+        _, pointer_text, size_text, access_type, thread_text = parts
+    elif len(parts) == 6:
+        _, access_type, pointer_text, size_text, thread_text, _ = parts
+    else:
+        return None, f"unexpected field count ({len(parts)})"
+
+    pointer = parse_non_negative_int(pointer_text, 16)
+    if pointer is None:
+        return None, "invalid pointer"
+
+    size = parse_non_negative_int(size_text)
+    if size is None:
+        return None, "invalid size"
+
+    thread = parse_non_negative_int(thread_text)
+    if thread is None:
+        return None, "invalid thread"
+
+    return (access_type, pointer, size, thread), None
 
 
 def ratio(part: int, total: int) -> float:
@@ -51,10 +82,43 @@ def print_byte_stats_skipped() -> None:
     print("Multi-threaded accesses (byte):                skipped")
 
 
+def print_malformed_line_stats(
+    total_lines: int,
+    trace_lines: int,
+    non_trace_lines: int,
+    malformed_trace_lines: int,
+    malformed_reasons: Counter[str],
+    malformed_examples: list[tuple[int, str, str]],
+) -> None:
+    print()
+    print("Input lines:                " + str(total_lines))
+    print("Trace lines seen:           " + str(trace_lines))
+    print("Ignored non-trace lines:    " + str(non_trace_lines))
+
+    malformed_ratio = ratio(malformed_trace_lines, trace_lines)
+    print(f"Malformed trace lines:      {str(malformed_trace_lines).ljust(10)} ({malformed_ratio}% of trace lines)")
+
+    if not malformed_trace_lines:
+        return
+
+    print()
+    print("Malformed trace line reasons:")
+    for reason, count in malformed_reasons.most_common():
+        print(f"  - {reason}: {count}")
+
+    if not malformed_examples:
+        return
+
+    print()
+    print("Malformed trace line examples:")
+    for line_number, reason, example in malformed_examples:
+        print(f"  - line {line_number} ({reason}): {example}")
+
+
 def main() -> None:
 
     if len(sys.argv) not in (2, 3) or (len(sys.argv) == 3 and sys.argv[2] not in (BYTE_STATS_FLAG, SKIP_BYTE_STATS_FLAG)):
-        print(f"Usage: trace-analyze2.py <file> [{BYTE_STATS_FLAG}]")
+        print(f"Usage: trace-analyze2.py <file> [{BYTE_STATS_FLAG}|{SKIP_BYTE_STATS_FLAG}]")
         exit(1)
 
     log_file = sys.argv[1]
@@ -65,7 +129,7 @@ def main() -> None:
     access_types = set()
     pointer_states: dict[int, int] = {}
     byte_pointer_states: dict[int, int] | None = {} if byte_stats_enabled else None
-    thread_ids: dict[str, int] = {}
+    thread_ids: dict[int, int] = {}
 
     access_multi = 0
     access_total = 0
@@ -75,13 +139,31 @@ def main() -> None:
     access_total_byte = 0
     pointers_multi_byte = 0
 
-    with open(log_file) as log:
-        for line in log:
+    total_lines = 0
+    trace_lines = 0
+    non_trace_lines = 0
+    malformed_trace_lines = 0
+    malformed_reasons: Counter[str] = Counter()
+    malformed_examples: list[tuple[int, str, str]] = []
+
+    with open(log_file, encoding="utf-8", errors="replace") as log:
+        for line_number, line in enumerate(log, start=1):
+            total_lines += 1
+
             if not line.startswith(" > "):
+                non_trace_lines += 1
                 continue
 
-            parsed = parse_trace_line(line)
+            trace_lines += 1
+
+            parsed, error = parse_trace_line(line)
             if parsed is None:
+                malformed_trace_lines += 1
+                malformed_reasons[error or "unknown parse error"] += 1
+
+                if len(malformed_examples) < MALFORMED_LINE_EXAMPLES_LIMIT:
+                    malformed_examples.append((line_number, error or "unknown parse error", line.rstrip()))
+
                 continue
 
             access_type, pointer, size, thread = parsed
@@ -126,6 +208,15 @@ def main() -> None:
     print()
     print(f"Addresses with multi-threaded access:          {str(pointers_multi).ljust(10)} ({pointers_multi_ratio}% of total)")
     print(f"Multi-threaded accesses:                       {str(access_multi).ljust(10)} ({access_multi_ratio}% of total)")
+
+    print_malformed_line_stats(
+        total_lines,
+        trace_lines,
+        non_trace_lines,
+        malformed_trace_lines,
+        malformed_reasons,
+        malformed_examples,
+    )
 
     if byte_pointer_states is None:
         print_byte_stats_skipped()
