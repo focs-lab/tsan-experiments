@@ -5,10 +5,17 @@ set -e
 SUMMARY_CSV="summary_ffmpeg_benchmark.csv"
 SUMMARY_JSON="summary_ffmpeg_benchmark.json"
 
+MAX_THREADS="$(nproc)"
 
-for CUR_THREADS in 4 8 16 2; do
+if [ "$MAX_THREADS" -lt 2 ]; then
+	echo "Need at least 2 CPUs to run the contention benchmark sweep (nproc=$MAX_THREADS)."
+	exit 1
+fi
+
+
+for CUR_THREADS in $(seq 2 2 "$MAX_THREADS"); do
 	echo -e "\n  \e[94mCurrent threads: $CUR_THREADS\e[m  \n"
-	export FFMPEG_BENCH_NPROC_COUNT=$CUR_THREADS
+	export FFMPEG_BENCH_NPROC_COUNT="$CUR_THREADS"
 
 	THREADRESULTSDIR="results_threads-${CUR_THREADS}"
 
