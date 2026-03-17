@@ -3,6 +3,11 @@
 NTHREADS=10
 NTESTS=5
 MEMTIER_EXTRA_ARGS=""
+MEMCACHED_TYPE=$(cat memcached_type)
+
+if [ "$MEMCACHED_TYPE" = "tsan" ]; then
+    NTESTS=$((NTESTS * 5))
+fi
 
 # Check for trace argument
 for arg in "$@"; do
@@ -19,9 +24,9 @@ mkdir -p results
 	--hide-histogram -t $NTHREADS -p 7777 -x $NTESTS --pipeline 16 -P memcache_text \
     --random-data \
     $MEMTIER_EXTRA_ARGS \
-    | tee "results/$(cat memcached_type)_results.txt"
+    | tee "results/${MEMCACHED_TYPE}_results.txt"
 
-echo -e "\e[94mmemcached type: $(cat memcached_type)\e[m"
+echo -e "\e[94mmemcached type: ${MEMCACHED_TYPE}\e[m"
 
 echo kill `cat memcached_pid`
 kill `cat memcached_pid`
