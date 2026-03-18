@@ -1,8 +1,9 @@
+	for i in trace_*.stderr.log.zst "$SUMMARY_CSV" "$SUMMARY_JSON" "vtune_results"; do
 #!/bin/bash
 
 set -e
-
-SUMMARY_CSV="summary_ffmpeg_benchmark.csv"
+SUMMARY_CSV_NAME="summary_ffmpeg_benchmark.csv"
+SUMMARY_JSON_NAME="summary_ffmpeg_benchmark.json"
 SUMMARY_JSON="summary_ffmpeg_benchmark.json"
 
 MAX_THREADS="$(nproc)"
@@ -20,13 +21,12 @@ for CUR_THREADS in $(seq 2 2 "$MAX_THREADS"); do
 	THREADRESULTSDIR="results_threads-${CUR_THREADS}"
 
 	[ -d "$THREADRESULTSDIR" ] && echo "Removing dir '$THREADRESULTSDIR'." && rm -rf "$THREADRESULTSDIR"
+	export SUMMARY_CSV="$THREADRESULTSDIR/$SUMMARY_CSV_NAME"
+	export SUMMARY_JSON="$THREADRESULTSDIR/$SUMMARY_JSON_NAME"
 	mkdir -p "$THREADRESULTSDIR"
 
-	./bench_ffmpeg_all.sh
-
-	for i in trace_*.stderr.log.zst "$SUMMARY_CSV" "$SUMMARY_JSON" "vtune_results"; do
 		if [ -e "$i" ]; then
-			echo "Move '$i' to '$THREADRESULTSDIR'."
+	for i in trace_*.stderr.log.zst "vtune_results"; do
 			mv -f "$i" "$THREADRESULTSDIR"
 		else
 			echo "Skipped '$i'."
