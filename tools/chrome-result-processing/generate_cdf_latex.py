@@ -1,11 +1,48 @@
 #!/usr/bin/env python3
 
+import argparse
+import sys
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 
+DEFAULT_CSV_FILENAME = 'speedometer3_results.csv'
+
+
+def resolve_default_csv_path() -> Path:
+    default_name = Path(DEFAULT_CSV_FILENAME)
+    script_dir = Path(__file__).resolve().parent
+
+    for candidate in (
+        Path.cwd() / default_name,
+        script_dir / default_name,
+        script_dir / 'csv' / default_name,
+    ):
+        if candidate.exists():
+            return candidate
+
+    return default_name
+
+
 # 1. Загружаем данные
-csv_filename = 'speedometer3_results.csv'
-df = pd.read_csv(csv_filename)
+parser = argparse.ArgumentParser(
+    description='Генерирует LaTeX-код для CDF графиков ускорений по CSV с результатами Speedometer 3.'
+)
+parser.add_argument(
+    'csv_filename',
+    nargs='?',
+    help='Путь к CSV-файлу с результатами (по умолчанию: speedometer3_results.csv).'
+)
+args = parser.parse_args()
+
+csv_filename = Path(args.csv_filename) if args.csv_filename else resolve_default_csv_path()
+
+try:
+    df = pd.read_csv(csv_filename)
+except FileNotFoundError:
+    print(f"Ошибка: CSV-файл '{csv_filename}' не найден.", file=sys.stderr)
+    sys.exit(1)
 
 # 2. Оставляем только тесты, которые измеряются в миллисекундах (исключаем агрегированный Score)
 df = df[df['unit'] == 'ms']
