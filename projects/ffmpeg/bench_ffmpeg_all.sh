@@ -13,7 +13,7 @@ FF_BUILD_LIST_STR=$(ls -d ffmpeg-orig ffmpeg-tsan* 2>/dev/null | xargs)
 #FF_BUILD_LIST_STR="ffmpeg-tsan-dom_peeling-ea-lo-st-swmr ffmpeg-tsan-dom_peeling-ea-lo-st-swmr-stmt"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
 
 # Number of runs to average the results (force set to 1 with `--trace`):
-RUNS_COUNT=3
+RUNS_COUNT=1
 
 [ -z "$FFMPEG_BENCH_NPROC_COUNT" ] && FFMPEG_BENCH_NPROC_COUNT="$(nproc)"
 
@@ -57,7 +57,7 @@ fi
 if command -v jq > /dev/null 2>&1; then
 	JQ_AVAILABLE=true
 	JSON_RESULTS_FILE=$(mktemp)
-	SUMMARY_JSON="summary_ffmpeg_benchmark.json"
+	SUMMARY_JSON="${SUMMARY_JSON:-summary_ffmpeg_benchmark.json}"
 	echo "jq found, will generate JSON output to $SUMMARY_JSON."
 else
 	JQ_AVAILABLE=false
@@ -78,7 +78,11 @@ echo "Video file: $FF_TEST_VIDEO"
 echo "Runs per test: $RUNS_COUNT"
 echo ""
 
-SUMMARY_CSV="summary_ffmpeg_benchmark.csv"
+SUMMARY_CSV="${SUMMARY_CSV:-summary_ffmpeg_benchmark.csv}"
+mkdir -p "$(dirname "$SUMMARY_CSV")"
+if [ "$JQ_AVAILABLE" = true ]; then
+	mkdir -p "$(dirname "$SUMMARY_JSON")"
+fi
 echo "Codec,FFBUILD,runs_completed,mean_time_s,stddev_time_s,min_time_s,max_time_s,mean_user_s,mean_system_s,max_mem_kb,command_template" > "$SUMMARY_CSV"
 
 read -ra FF_BUILD_ARRAY <<< "$FF_BUILD_LIST_STR"
@@ -191,9 +195,10 @@ for CODEC_KEY in "${!CODECS[@]}"; do
 		# --- Output results and append to files ---
 		echo "  Results: Time(avg±std): ${MEAN_TIME}s ± ${STDDEV_TIME}s | Mem(peak): ${MAX_MEM_PEAK}KB | Runs: ${SUCCESSFUL_RUNS}/${RUNS_COUNT}"
 
+		CMD_TEMPLATE_CSV=${CMD_TEMPLATE//\"/\"\"}
 		CSV_LINE=$(printf '"%s","%s","%s",%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,"%s"\n' \
 			"$CODEC_KEY" "$BUILD" "${SUCCESSFUL_RUNS}/${RUNS_COUNT}" "$MEAN_TIME" "$STDDEV_TIME" \
-			"$MIN_TIME" "$MAX_TIME" "$MEAN_USER" "$MEAN_SYSTEM" "$MAX_MEM_PEAK" "$CMD_TEMPLATE")
+			"$MIN_TIME" "$MAX_TIME" "$MEAN_USER" "$MEAN_SYSTEM" "$MAX_MEM_PEAK" "$CMD_TEMPLATE_CSV")
 		echo "$CSV_LINE" >> "$SUMMARY_CSV"
 
 		if [ "$JQ_AVAILABLE" = true ]; then
