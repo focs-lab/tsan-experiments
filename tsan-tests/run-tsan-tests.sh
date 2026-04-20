@@ -44,7 +44,7 @@ RUN_TESTS=(
 # Optionally override which test cases run:
 #   # quick manual way: edit RUN_TESTS above
 #   TSAN_TESTS="main,tsan-dominance-based"
-#   ./run-tsan-tests.sh --skip-git main tsan-dominance-based
+#   ./run-tsan-tests.sh main tsan-dominance-based
 SELECTED_TESTS=()
 
 C_COMPILER="/usr/bin/clang"
@@ -195,22 +195,53 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-RUN_CHECK_ALL=false
-SKIP_GIT=false
+RUN_CHECK_ALL=true
+SKIP_GIT=true
 
-# Parse arguments (robust)
+print_usage() {
+  cat <<EOF
+Usage: $(basename "$0") [options] [test-name ...]
+
+Defaults:
+  - skip git operations and use local branches
+  - run check-all after the branch-specific check target
+  - run tests from RUN_TESTS if no test names are given
+
+Options:
+  --check-all      Run check-all (default)
+  --no-check-all   Skip check-all
+  --skip-git       Use local branches only; do not fetch (default)
+  --git            Fetch/switch from origin/<branch>
+  -h, --help       Show this help
+EOF
+}
+
+# Parse arguments (defaults: --check-all and --skip-git are enabled)
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --check-all)
       RUN_CHECK_ALL=true
       shift
       ;;
+    --no-check-all)
+      RUN_CHECK_ALL=false
+      shift
+      ;;
     --skip-git)
       SKIP_GIT=true
       shift
       ;;
+    --git)
+      SKIP_GIT=false
+      shift
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
     -*)
       echo "❌ Unknown option: $1" >&2
+      print_usage >&2
       exit 2
       ;;
     *)
@@ -438,5 +469,5 @@ echo "Logs are saved in the current directory with the pattern:"
 echo "  <branch>-build.log"
 echo "  <branch>-lit.log (if a lit target was specified)"
 echo "  <branch>-check.log"
-echo "  <branch>-check-all.log (if --check-all was used)"
+echo "  <branch>-check-all.log (if check-all was enabled)"
 echo "===================================="
