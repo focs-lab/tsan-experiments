@@ -204,7 +204,7 @@ parse_lit_summary() {
 
 run_branch_tests() {
   local branch=$1
-  local testfile=$2
+  local lit_target=$2
   local target=$3
   local LOG_DIR="$LLVM_ROOT"
 
@@ -249,32 +249,23 @@ run_branch_tests() {
   }
   echo -e "${GREEN}✅ Build completed for $branch${NC}"
 
-  if [[ -n "$testfile" ]]; then
-    echo "🧪 Running local .ll test: $testfile"
+  if [[ -n "$lit_target" ]]; then
+    echo "🧪 Running lit target: $lit_target"
 
-    # Pick the directory where the test actually lives.
-    # - dominance-elimination.ll: Instrumentation/ThreadSanitizer (LLVM_TEST_DIR)
-    # - escape-analysis.ll: Analysis/EscapeAnalysis (LLVM_ESCAPE_TEST_DIR)
-    local TEST_DIR="$LLVM_TEST_DIR"
-    if [[ "$testfile" == "escape-analysis.ll" ]]; then
-      TEST_DIR="$LLVM_ESCAPE_TEST_DIR"
-    fi
-
-    cd "$TEST_DIR"
     local LIT_BIN
     if ! LIT_BIN="$(resolve_lit_bin)"; then
       echo "❌ llvm-lit not found (expected at $LLVM_BUILD/bin/llvm-lit or in PATH)" >&2
       return 1
     fi
     local LIT_LOG="$LOG_DIR/${branch}-lit.log"
-    if "$LIT_BIN" -v "$testfile" &>"$LIT_LOG"; then
-      echo -e "${GREEN}✅ .ll test passed${NC}"
+    if "$LIT_BIN" -v "$lit_target" &>"$LIT_LOG"; then
+      echo -e "${GREEN}✅ Lit target passed${NC}"
     else
-      echo -e "${RED}❌ .ll test failed${NC}"
+      echo -e "${RED}❌ Lit target failed${NC}"
     fi
     parse_lit_summary "$LIT_LOG"
   else
-    echo "🧪 Skipping local .ll test (no test file specified)"
+    echo "🧪 Skipping lit target (none specified)"
   fi
 
   echo "🏗  Running full check target: $target"
@@ -309,8 +300,9 @@ run_branch_tests() {
 start_time=$(date +%s)
 
 run_branch_tests "main" "" "check-tsan"
-run_branch_tests "tsan-escape-analysis" "escape-analysis.ll" "check-tsan"
-run_branch_tests "tsan-dominance-based" "dominance-elimination.ll" "check-tsan-dominance-analysis"
+run_branch_tests "tsan-escape-analysis" "$LLVM_ESCAPE_TEST_DIR/escape-analysis.ll" "check-tsan"
+run_branch_tests "tsan-escape-analysis-integration" "$LLVM_TEST_DIR" "check-tsan"
+run_branch_tests "tsan-dominance-based" "$LLVM_TEST_DIR/dominance-elimination.ll" "check-tsan-dominance-analysis"
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))
@@ -319,7 +311,7 @@ echo "===================================="
 echo "🎯 All tests finished in ${runtime}s"
 echo "Logs are saved in the current directory with the pattern:"
 echo "  <branch>-build.log"
-echo "  <branch>-lit.log (if a test file was specified)"
+echo "  <branch>-lit.log (if a lit target was specified)"
 echo "  <branch>-check.log"
 echo "  <branch>-check-all.log (if --check-all was used)"
 echo "===================================="
