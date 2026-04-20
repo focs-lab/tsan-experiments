@@ -23,6 +23,30 @@ echo "LLVM Build directory: $LLVM_BUILD"
 LLVM_TEST_DIR="$LLVM_ROOT/llvm/test/Instrumentation/ThreadSanitizer"
 LLVM_ESCAPE_TEST_DIR="$LLVM_ROOT/llvm/test/Analysis/EscapeAnalysis"
 
+# === TEST CASES ===
+# Each entry is: branch|lit_target|check_target
+TEST_CASES=(
+  "main||check-tsan"
+  "tsan-escape-analysis|$LLVM_ESCAPE_TEST_DIR/escape-analysis.ll|check-tsan"
+  "tsan-escape-analysis-integration|$LLVM_TEST_DIR|check-tsan"
+  "tsan-dominance-based|$LLVM_TEST_DIR/dominance-elimination.ll|check-tsan-dominance-analysis"
+)
+
+# Quick manual selection: edit this list and run the script.
+# If no CLI args and no TSAN_TESTS env var are provided, only these tests will run.
+RUN_TESTS=(
+  "main"
+  "tsan-escape-analysis"
+  "tsan-escape-analysis-integration"
+  "tsan-dominance-based"
+)
+
+# Optionally override which test cases run:
+#   # quick manual way: edit RUN_TESTS above
+#   TSAN_TESTS="main,tsan-dominance-based"
+#   ./run-tsan-tests.sh --skip-git main tsan-dominance-based
+SELECTED_TESTS=()
+
 C_COMPILER="/usr/bin/clang"
 CXX_COMPILER="/usr/bin/clang++"
 
@@ -43,6 +67,101 @@ resolve_lit_bin() {
     echo "$lit"
     return 0
   fi
+  return 1
+}
+
+list_available_tests() {
+  local test_case branch _ lit_target check_target
+
+  echo "Available tests:"
+  for test_case in "${TEST_CASES[@]}"; do
+    IFS='|' read -r branch lit_target check_target <<< "$test_case"
+    echo "  - $branch"
+  done
+}
+
+test_case_exists() {
+  local wanted_branch=$1
+  local test_case branch _ lit_target check_target
+
+  for test_case in "${TEST_CASES[@]}"; do
+    IFS='|' read -r branch lit_target check_target <<< "$test_case"
+    if [[ "$branch" == "$wanted_branch" ]]; then
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+parse_selected_tests() {
+  local normalized
+
+  if (( $# > 0 )); then
+    SELECTED_TESTS=("$@")
+    return 0
+  fi
+
+  if [[ -v TSAN_TESTS ]]; then
+    normalized="${TSAN_TESTS//,/ }"
+    read -r -a SELECTED_TESTS <<< "$normalized"
+
+    if (( ${#SELECTED_TESTS[@]} == 0 )); then
+      echo "❌ TSAN_TESTS is set but empty." >&2
+      echo "   Use a comma/space-separated list of test names." >&2
+      list_available_tests >&2
+      exit 2
+    fi
+
+    return 0
+  fi
+
+  SELECTED_TESTS=("${RUN_TESTS[@]}")
+}
+
+validate_selected_tests_or_exit() {
+  local selected_branch
+  local seen=" "
+
+  if (( ${#SELECTED_TESTS[@]} == 0 )); then
+    echo "❌ No tests selected." >&2
+    echo "   Edit RUN_TESTS near the top of the script, or pass tests via CLI/TSAN_TESTS." >&2
+    list_available_tests >&2
+    exit 2
+  fi
+
+  for selected_branch in "${SELECTED_TESTS[@]}"; do
+    if [[ -z "$selected_branch" ]]; then
+      echo "❌ Empty test name in selection." >&2
+      list_available_tests >&2
+      exit 2
+    fi
+
+    if [[ "$seen" == *" $selected_branch "* ]]; then
+      echo "❌ Duplicate test in selection: $selected_branch" >&2
+      exit 2
+    fi
+
+    if ! test_case_exists "$selected_branch"; then
+      echo "❌ Unknown test: $selected_branch" >&2
+      list_available_tests >&2
+      exit 2
+    fi
+
+    seen+="$selected_branch "
+  done
+}
+
+is_selected_test() {
+  local wanted_branch=$1
+  local selected_branch
+
+  for selected_branch in "${SELECTED_TESTS[@]}"; do
+    if [[ "$selected_branch" == "$wanted_branch" ]]; then
+      return 0
+    fi
+  done
+
   return 1
 }
 
@@ -297,12 +416,18 @@ run_branch_tests() {
 
 # === MAIN ===
 
+parse_selected_tests "$@"
+validate_selected_tests_or_exit
+
 start_time=$(date +%s)
 
-run_branch_tests "main" "" "check-tsan"
-run_branch_tests "tsan-escape-analysis" "$LLVM_ESCAPE_TEST_DIR/escape-analysis.ll" "check-tsan"
-run_branch_tests "tsan-escape-analysis-integration" "$LLVM_TEST_DIR" "check-tsan"
-run_branch_tests "tsan-dominance-based" "$LLVM_TEST_DIR/dominance-elimination.ll" "check-tsan-dominance-analysis"
+for test_case in "${TEST_CASES[@]}"; do
+  IFS='|' read -r branch lit_target check_target <<< "$test_case"
+
+  if is_selected_test "$branch"; then
+    run_branch_tests "$branch" "$lit_target" "$check_target"
+  fi
+done
 
 end_time=$(date +%s)
 runtime=$((end_time - start_time))
