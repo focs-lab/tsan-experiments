@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export CCACHE_DISABLE=1
+#export CCACHE_DISABLE=1
 
 # === CONFIGURATION ===
 # Check for environment variables to set LLVM_BUILD
 DEFAULT_LLVM_ROOT="$HOME/dev/llvm-project-tsan"
 BUILD_DIR="cmake-build-for-test"
 
-# Use N% of CPUs for builds (default: 75)
-CPU_PERCENT="${CPU_PERCENT:-80}"
+# Use N% of CPUs for builds (default: 50)
+CPU_PERCENT="${CPU_PERCENT:-50}"
 
 C_COMPILER="/usr/bin/clang"
 CXX_COMPILER="/usr/bin/clang++"
@@ -29,7 +29,7 @@ TEST_CASES=(
   "main||check-tsan"
   "tsan-escape-analysis|$LLVM_ESCAPE_TEST_DIR/escape-analysis.ll|check-tsan"
   "tsan-escape-analysis-integration|$LLVM_TEST_DIR|check-tsan"
-  "tsan-dominance-based|$LLVM_TEST_DIR/dominance-elimination.ll|check-tsan-dominance-analysis"
+  "tsan-dominance-based|$LLVM_TEST_DIR/dominance-elimination.ll|check-tsan"
 )
 
 # Quick manual selection: edit this list and run the script.
