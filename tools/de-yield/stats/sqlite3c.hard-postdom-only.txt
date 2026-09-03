@@ -1,0 +1,6 @@
+  36347 tsan                         - Number of instrumented reads
+  17872 tsan                         - Number of instrumented writes
+    438 tsan                         - Number of accesses ignored due to post-dominance
+   3384 tsan                         - Number of accesses ignored due to capturing
+   2691 tsan                         - Number of reads ignored due to following writes
+   1113 tsan                         - Number of reads from constant globals

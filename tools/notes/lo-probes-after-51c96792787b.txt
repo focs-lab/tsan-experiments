@@ -1,0 +1,6 @@
+compiler: /home/alexey/dev/llvm-project-focs-lab/llvm/build/bin/clang (clang version 19.0.0git (https://github.com/focs-lab/llvm-project e5080b0ab46353bf91f68e290ffab10550397214))
+probe                        stock: instr/reports   LO: instr/reports     
+lo_control 1 / 0 of 5             0 / 0 of 5            
+lo_distinct_instances 1 / 5 of 5             1 / 5 of 5            
+lo_striped_array 1 / 5 of 5             1 / 5 of 5            
+lo_two_mutexes_one_struct 2 / 5 of 5             2 / 5 of 5            

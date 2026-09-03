@@ -1,0 +1,8 @@
+-- Using Capture Tracker for Module build/sqlite3.c --
+-- Using Dominance Analysis for Module build/sqlite3.c --
+  27745 tsan                         - Number of instrumented reads
+  10251 tsan                         - Number of instrumented writes
+  16662 tsan                         - Number of accesses ignored due to dominance
+   3384 tsan                         - Number of accesses ignored due to capturing
+   2691 tsan                         - Number of reads ignored due to following writes
+   1113 tsan                         - Number of reads from constant globals
