@@ -8,7 +8,18 @@
 #------------------------------------------------------------------------------
 # Configuration
 #------------------------------------------------------------------------------
-LLVM_BUILD_DIR="$LLVM_PATH"
+# Compiler: tools/tsan_compiler.sh (sourced below, after SCRIPT_DIR is known) selects the
+# hardened prototype in ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set.  The old
+# LLVM_BUILD_DIR="$LLVM_PATH" is gone: ~/.bashrc exports LLVM_PATH=~/dev/llvm-project/llvm/build,
+# which since 2026-05 is a symlink to the unrelated llvm-capstone tree.
+LLVM_BUILD_DIR=""
+
+# Whole-program analysis summaries (hardened compiler: opt-in, read from <cwd>/tsan-logs/).
+#   USE_SUMMARIES=0  (default) optimized builds run the per-TU analyses only;
+#   USE_SUMMARIES=1  copy $SUMMARIES_DIR/{st,lo,ea}_summary.txt (see ./gen_summaries.sh) into
+#                    redis-<cfg>/src/tsan-logs/ and pass -mllvm -tsan-use-analysis-summaries.
+USE_SUMMARIES="${USE_SUMMARIES:-0}"
+SUMMARIES_DIR="${SUMMARIES_DIR:-$(dirname "$(realpath -s "$0")")/summaries}"
 
 # Redis source archive URL
 BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
@@ -17,6 +28,10 @@ BENCH_ARCHIVE_URL="https://download.redis.io/releases/redis-7.0.15.tar.gz"
 # Directory and File Paths
 #------------------------------------------------------------------------------
 SCRIPT_DIR=$(dirname "$(realpath -s "$0")")
+source "$SCRIPT_DIR/../../tools/tsan_compiler.sh" || exit 1
+source "$SCRIPT_DIR/../../tools/write_build_info.sh"
+LLVM_BUILD_DIR="$TSAN_LLVM_ROOT"
+[[ "$SUMMARIES_DIR" = /* ]] || SUMMARIES_DIR="$SCRIPT_DIR/$SUMMARIES_DIR"
 BENCH_POLYGON_DIR="$SCRIPT_DIR/redis-polygon"     # Working directory for builds
 BENCH_ARCHIVE_NAME=$(basename "$BENCH_ARCHIVE_URL")
 RESULTS_DIR="__results_redis__"                # Main results directory
@@ -25,6 +40,7 @@ TRACES_DIR=""
 LOCAL_TRACES_DIR=""
 TRACE_RAM_ROOT="/dev/shm"
 TRACES_COPIED=false
+TRACE_PIPE_PID=""
 RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
 STATS_FILE="$RESULTS_DIR/instr_count.txt"
 TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary directory
@@ -50,7 +66,8 @@ TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary direc
 
 # For tracing
 #BUILD_OPTIONS="tsan ea-lo-st-swmr-stmt ea-lo-st-swmr dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt"
-BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt ea-lo-st-swmr-stmt ea-lo-st-swmr"
+#BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt ea-lo-st-swmr-stmt ea-lo-st-swmr"
+BUILD_OPTIONS="${BUILD_OPTIONS:-ea-lo-st-swmr-stmt}"
 #BUILD_OPTIONS="dom_peeling-ea-lo-st-swmr-stmt dom_peeling-ea-lo-st-swmr dom-ea-lo-st-swmr dom-ea-lo-st-swmr-stmt"
 
 #BUILD_OPTIONS="orig tsan dom ea dom-ea lo dom-lo ea-lo dom-ea-lo \
@@ -113,6 +130,8 @@ copy_traces_to_local() {
         return 0
     fi
 
+    wait_for_trace_pipeline || return 1
+
     if [ -z "$TRACES_DIR" ] || [ ! -d "$TRACES_DIR" ]; then
         return 0
     fi
@@ -126,6 +145,26 @@ copy_traces_to_local() {
     rm -rf "$TRACES_DIR"
     TRACES_COPIED=true
     log "Trace files copied to: $LOCAL_TRACES_DIR"
+}
+
+wait_for_trace_pipeline() {
+    local pid
+    local status
+
+    pid="${TRACE_PIPE_PID:-}"
+    if [ -z "$pid" ]; then
+        return 0
+    fi
+
+    TRACE_PIPE_PID=""
+
+    if wait "$pid"; then
+        return 0
+    fi
+
+    status=$?
+    echo "Error: trace compression pipeline failed with exit code $status" >&2
+    return "$status"
 }
 
 stop_redis_servers() {
@@ -202,8 +241,8 @@ fi
 [ -z "$LLVM_BUILD_DIR" ] && { echo -e "No LLVM_BUILD_DIR set\n  Example: /home/user/llvm-project/build-release"; exit 1; }
 
 export PATH="$LLVM_BUILD_DIR/bin:$PATH"
-export CC=clang
-export CXX=clang++
+export CC="$TSAN_CC"
+export CXX="$TSAN_CXX"
 export LC_ALL=en_US.UTF-8
 
 # --- Functions ---
@@ -246,7 +285,7 @@ ensure_executable() {
 
 ensure_built_variant() {
     local option="$1"
-    local server_bin="redis-$option/src/redis-server"
+    local server_bin="redis-$option${BUILD_TAG:-}/src/redis-server"
 
     if [ -x "$server_bin" ]; then
         return 0
@@ -340,33 +379,20 @@ if [ "$COMPILE" = true ]; then
     ensure_executable redis-benchmark redis-benchmark || exit 1
     cd ../..
 
-    if [[ -d "$SCRIPT_DIR/summaries" ]]
-    then
-        log "Ready summaries found"
-        cp -r "$SCRIPT_DIR/summaries" .
+    # Whole-program summaries: produced up front by ./gen_summaries.sh (uninstrumented IR of
+    # the whole server, analyses run with -tsan-use-analysis-summaries).  The paper-era block
+    # that emitted an instrumented redis-server.ll and ran `opt -passes=print<...>` here was
+    # removed: its output was never picked up by the builds (see gen_summaries.sh header).
+    if [ "$USE_SUMMARIES" = 1 ]; then
+        for f in st lo ea; do
+            [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || {
+                echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty (run ./gen_summaries.sh)" >&2
+                exit 1
+            }
+        done
+        log "Using whole-program summaries from $SUMMARIES_DIR"
     else
-        log "Building a single LL"
-        tar --extract --file "$BENCH_ARCHIVE_NAME"
-        mv "$BENCH_ARCHIVE_DIR" redis-single-ll
-        cd redis-single-ll/src || exit 1
-        build_single_ll
-        cd ../..
-
-        log "Building summaries (may take a long time)"
-        mkdir summaries
-        cd summaries || exit 1
-        mkdir single-threaded lock-ownership escape-analysis-global
-        cp ../redis-single-ll/src/redis-server.ll single-threaded
-        cp ../redis-single-ll/src/redis-server.ll lock-ownership
-        cp ../redis-single-ll/src/redis-server.ll escape-analysis-global
-        cd single-threaded || exit 1
-        opt -S -disable-output -passes='print<single-threaded>' -debug-only=single-threaded redis-server.ll 2> /dev/null &
-        cd ../lock-ownership || exit 1
-        opt -S -disable-output -passes='print<lock-ownership>' -debug-only=lock-ownership redis-server.ll 2> /dev/null &
-        cd ../escape-analysis-global || exit 1
-        opt -S -disable-output -passes='print<escape-analysis-global>' -debug-only=ea-escaping-callees redis-server.ll 2> /dev/null &
-        wait
-        cd ../..
+        log "USE_SUMMARIES=0: optimized builds use per-TU analyses only (no whole-program summaries)"
     fi
 
     # Create results directory and files
@@ -385,7 +411,24 @@ if [ "$COMPILE" = true ]; then
     for OPTION in $BUILD_OPTIONS
     do
         log "Building configuration: $OPTION"
-        rm -rf "redis-$OPTION"
+        TSAN_FLAGS=""
+        SUMMARY_NOTE=""
+        # BUILD_TAG (env, e.g. ".paper-compiler") keeps A/B builds with another compiler
+        # (LLVM_TSAN_ROOT) next to the default ones: redis-<opt><tag>.
+        DIR="redis-$OPTION${BUILD_TAG:-}"
+        if [ -d "$DIR" ]; then
+            if [ -f "$DIR/src/build_info.txt" ]; then
+                rm -rf "$DIR"
+            else
+                # A build without build_info.txt predates this script version (paper-era
+                # binary): keep it for provenance instead of deleting it.
+                OLD_STAMP=$(date -r "$( [ -f "$DIR/src/redis-server" ] && echo "$DIR/src/redis-server" || echo "$DIR" )" +%Y%m%d)
+                mkdir -p old-builds
+                log "Archiving paper-era build $DIR -> old-builds/$DIR.$OLD_STAMP"
+                rm -rf "old-builds/$DIR.$OLD_STAMP"
+                mv "$DIR" "old-builds/$DIR.$OLD_STAMP"
+            fi
+        fi
 
         # Rename the temporary TSan directory before the build
         rename_dir_with_suffix "$TSAN_TMP_DIR" "${TSAN_TMP_DIR}_redis_old"
@@ -393,8 +436,8 @@ if [ "$COMPILE" = true ]; then
         mkdir -p "$TSAN_TMP_DIR"
 
         tar --extract --file "$BENCH_ARCHIVE_NAME"
-        mv "$BENCH_ARCHIVE_DIR" "redis-$OPTION"
-        cd "redis-$OPTION"/src || exit 1
+        mv "$BENCH_ARCHIVE_DIR" "$DIR"
+        cd "$DIR"/src || exit 1
 
         start_time=$SECONDS
         BUILD_LOG="../../$RESULTS_DIR/build-$OPTION.log"
@@ -413,36 +456,67 @@ if [ "$COMPILE" = true ]; then
                 exit 1
             fi
         else
-            [ -d "../../summaries/escape-analysis-global/ea-logs" ] && \
-              cp -r ../../summaries/escape-analysis-global/ea-logs .
-
-            [ -f "../../summaries/lock-ownership/lo_summary.txt" ] && \
-              cp ../../summaries/lock-ownership/lo_summary.txt .
-
-            [ -f "../../summaries/single-threaded/st_summary.txt" ] && \
-              cp ../../summaries/single-threaded/st_summary.txt .
-
-            [ -f "../../summaries/escape-analysis-global/ea-logs/ea_summary.txt" ] && \
-              cp ../../summaries/escape-analysis-global/ea-logs/ea_summary.txt .
-
             TSAN_FLAGS=""
-            [[ "$OPTION" == *"tsan_no_atomics"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-instrument-atomics=false"
-            [[ "$OPTION" == *"lo"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership"
-            [[ "$OPTION" == *"swmr"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr"
-            [[ "$OPTION" == *"st"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-single-threaded"
-            [[ "$OPTION" == *"stmt"* ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-active-thread-count"
-            [[ "$OPTION" == *"ea"*   ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global"
-            [[ "$OPTION" == *"dom"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis"
-            [[ "$OPTION" == *"dom_peeling"*  ]] && TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
+            SUMMARY_NOTE="summaries: none (per-TU analyses only)"
+            if [ "$USE_SUMMARIES" = 1 ]; then
+                # The hardened compiler reads tsan-logs/<x>_summary.txt from its CWD (src/)
+                # only with -tsan-use-analysis-summaries.  Files are made read-only because
+                # the EA pass rewrites ea_summary.txt per module otherwise (open fails
+                # non-fatally on a 444 file, so the whole-program file survives).
+                mkdir -p tsan-logs
+                cp "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt tsan-logs/
+                chmod 444 tsan-logs/*_summary.txt
+                TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-analysis-summaries"
+                SUMMARY_NOTE="summaries: $SUMMARIES_DIR (st $(md5sum tsan-logs/st_summary.txt | cut -c1-8), lo $(md5sum tsan-logs/lo_summary.txt | cut -c1-8), ea $(md5sum tsan-logs/ea_summary.txt | cut -c1-8))"
+            fi
 
+            # Option name -> flags, matched per '-'-separated token (the paper-era substring
+            # match `*"st"*` also fired for "stmt", so the stand-alone stmt build had STC on).
+            for TOKEN in ${OPTION//-/ }; do
+                case "$TOKEN" in
+                    tsan_no_atomics) TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-instrument-atomics=false" ;;
+                    lo)          TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-lock-ownership" ;;
+                    swmr)        TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-swmr" ;;
+                    st)          TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-single-threaded" ;;
+                    stmt)        TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-active-thread-count" ;;
+                    ea)          TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global" ;;
+                    dom)         TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis" ;;
+                    dom_peeling) TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true" ;;
+                    # Rebuttal (plan P2/P3): the four sound analyses, i.e. AllOpt without DE.
+                    sound)       TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global -mllvm -tsan-use-lock-ownership -mllvm -tsan-use-single-threaded -mllvm -tsan-use-swmr" ;;
+                    *) echo "Error: unknown option token '$TOKEN' in '$OPTION'" >&2; exit 1 ;;
+                esac
+            done
+            # EXTRA_TSAN_FLAGS: diagnostic flags appended verbatim (e.g. -mllvm -tsan-ea-flow-insensitive);
+            # combine with BUILD_TAG so that such builds never replace the canonical redis-<option> dirs.
+            TSAN_FLAGS="$TSAN_FLAGS ${EXTRA_TSAN_FLAGS:-}"
+
+            # The flags go through REDIS_CFLAGS, not CFLAGS: a CFLAGS value coming from the
+            # environment is auto-exported by make to the deps/ sub-make together with the
+            # `-fsanitize=thread` that src/Makefile appends for SANITIZER=thread, so the
+            # paper-era builds (CFLAGS="$TSAN_FLAGS") instrumented lua, hiredis and
+            # hdr_histogram in every optimized build but NOT in the plain `tsan` baseline
+            # (compare deps/.make-cflags of the March builds: ~500 extra instrumented
+            # functions, e.g. luaV_execute, redisReaderGetReply, hdr_record_value).
+            # REDIS_CFLAGS only reaches src/ (FINAL_CFLAGS), so deps are treated the same
+            # way in all configurations (uninstrumented, as in the baseline).
             log "Building $OPTION"
-            if ! SANITIZER=thread USE_JEMALLOC=no CFLAGS="$TSAN_FLAGS" make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
+            if ! SANITIZER=thread USE_JEMALLOC=no REDIS_CFLAGS="$TSAN_FLAGS" make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
                 echo "Error: build failed for '$OPTION'. See $BUILD_LOG" >&2
                 exit 1
             fi
         fi
 
         ensure_executable redis-server "redis-server for '$OPTION'" || { echo "Hint: build log is $BUILD_LOG" >&2; exit 1; }
+
+        if [ "$USE_SUMMARIES" = 1 ] && [[ "$OPTION" != "orig" && "$OPTION" != "tsan" ]]; then
+            for f in st lo ea; do
+                cmp -s "$SUMMARIES_DIR/${f}_summary.txt" "tsan-logs/${f}_summary.txt" || {
+                    echo "Error: tsan-logs/${f}_summary.txt was modified during the build of '$OPTION'" >&2; exit 1; }
+            done
+        fi
+        write_build_info . "$CC" "SANITIZER=$([[ "$OPTION" = orig ]] && echo none || echo thread) REDIS_CFLAGS=${TSAN_FLAGS:-}" \
+            "config: $OPTION" "${SUMMARY_NOTE:-summaries: n/a}"
 
         duration=$(( SECONDS - start_time ))
         log "Finished building '$OPTION' in $duration seconds."
@@ -527,12 +601,13 @@ if [ "$TESTS" = true ]; then
 
         stop_redis_servers || exit 1
         ensure_built_variant "$OPTION" || exit 1
-        SERVER_BIN="redis-$OPTION/src/redis-server"
+        SERVER_BIN="redis-$OPTION${BUILD_TAG:-}/src/redis-server"
 
         if [ "$TRACE_MODE" = true ]; then
             TRACE_FILE="$TRACES_DIR/${OPTION}.trace"
             log "Redirecting trace output to ${TRACE_FILE}.zst"
             "$SERVER_BIN" redis.conf 2>&1 | zstd -1 -o "${TRACE_FILE}.zst" &
+            TRACE_PIPE_PID=$!
         else
             echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
             /usr/bin/time --verbose "$SERVER_BIN" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
@@ -566,6 +641,9 @@ if [ "$TESTS" = true ]; then
         fi
         
         stop_redis_servers || exit 1
+        if [ "$TRACE_MODE" = true ]; then
+            wait_for_trace_pipeline || exit 1
+        fi
         sleep 5
         rm -f dump.rdb
     done

@@ -58,28 +58,17 @@ if [[ "$CONFIG_TYPE" == "orig" ]]; then
     # However, your previous edit hardcoded LLVM_ROOT_PATH/bin/clang.
     # Let's stick to your version's compiler logic for now, which means 'orig' also uses LLVM clang.
     # If you want 'orig' to use GCC, this section needs adjustment.
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for 'orig'."
-    else
-        echo "Error: No suitable compiler (clang or gcc) found for 'orig' build."
-        exit 1
-    fi
+    # Same compiler as the TSan builds (tools/tsan_compiler.sh: hardened prototype in
+    # ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
+    # honoured if it really is that tree).
+    source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
+    TARGET_CC="$TSAN_CC"
 
 elif [[ "$CONFIG_TYPE" == tsan* ]]; then
     IS_TSAN_BUILD=true
-    # TSan builds MUST use clang
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for TSan build."
-    else
-        echo "Error: Clang compiler not found. Set LLVM_ROOT_PATH or ensure 'clang' is in PATH for TSan builds."
-        exit 1
-    fi
+    # TSan builds MUST use the prototype clang (see the 'orig' branch for the selection rule).
+    source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
+    TARGET_CC="$TSAN_CC"
 
     BASE_TSAN_FLAGS="$FLAGS_TSAN_COMMON_VAL $FLAGS_COMMON_BASE_VAL"
     COMBINED_EXTRA_FLAGS=""
@@ -132,6 +121,22 @@ fi
 # Remove leading/trailing/extra spaces
 FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
 
+# Whole-program analysis summaries (hardened compiler: opt-in, read from <compile cwd>/tsan-logs/,
+# here the FFmpeg build directory).  USE_SUMMARIES=1 requires $SUMMARIES_DIR/{st,lo,ea}_summary.txt.
+USE_SUMMARIES="${USE_SUMMARIES:-0}"
+SUMMARIES_DIR="${SUMMARIES_DIR:-$(pwd)/summaries}"
+SUMMARY_NOTE="summaries: n/a"
+if [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    SUMMARY_NOTE="summaries: none (per-TU analyses only)"
+    if [ "$USE_SUMMARIES" = 1 ]; then
+        for f in st lo ea; do
+            [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || { echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty"; exit 1; }
+        done
+        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+        SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+    fi
+fi
+
 
 # Directory for this specific build
 BUILD_DIR_NAME="/dev/shm/ffmpeg-${CONFIG_TYPE}"
@@ -153,6 +158,15 @@ if [ -d "$BUILD_DIR_NAME" ]; then
   echo "Removing existing directory: $BUILD_DIR_NAME"
   rm -rf "$BUILD_DIR_NAME"
 fi
+# An install prefix without build_info.txt predates this script version (paper-era, March 2026):
+# keep it under old-builds/ (a symlink to /extra, ~1 GB per prefix) instead of overwriting it in place.
+if [ -f "$RESULT_DIR_NAME/bin/ffmpeg" ] && [ ! -f "$RESULT_DIR_NAME/build_info.txt" ]; then
+  OLD_STAMP=$(date -r "$RESULT_DIR_NAME/bin/ffmpeg" +%Y%m%d)
+  mkdir -p old-builds
+  echo "Archiving paper-era build $RESULT_DIR_NAME -> old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
+  rm -rf "old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
+  mv "$RESULT_DIR_NAME" "old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
+fi
 mkdir -p "$BUILD_DIR_NAME"
 
 echo "Extracting $FFMPEG_ARCHIVE into $BUILD_DIR_NAME..."
@@ -166,6 +180,15 @@ fi
 #sed -i "s/check_cc\sintrinsics_neon\sarm_neon\.h/: ' check_cc intrinsics_neon arm_neon\.h/1" "$BUILD_DIR_NAME/configure"
 #sed -i "s=check_type\s\"vdpau/vdpau\.h\"\s\"VdpPictureInfoVP9\"=check_type \"vdpau/vdpau\.h\" \"VdpPictureInfoVP9\" '=1" "$BUILD_DIR_NAME/configure"
 ORIGPWD="$(pwd)"
+source "$ORIGPWD/../../tools/write_build_info.sh"
+
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    # Read-only: the EA pass rewrites ea_summary.txt per module otherwise (the failed open is
+    # non-fatal, so the whole-program file survives the build).
+    mkdir -p "$BUILD_DIR_NAME/tsan-logs"
+    cp "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt "$BUILD_DIR_NAME/tsan-logs/"
+    chmod 444 "$BUILD_DIR_NAME"/tsan-logs/*_summary.txt
+fi
 
 
 cd "$BUILD_DIR_NAME"
@@ -173,10 +196,8 @@ cd "$BUILD_DIR_NAME"
 
 echo "--- Configuring FFmpeg ($CONFIG_TYPE) ---"
 
-[ -z "$LLVM_ROOT_PATH" ] && echo "No \$LLVM_ROOT_PATH!" && exit 4
-
-CC="$LLVM_ROOT_PATH/bin/clang"
-CXX="$LLVM_ROOT_PATH/bin/clang++"
+CC="$TARGET_CC"
+CXX="$TSAN_CXX"
 
 [ ! -x "$CC" -o ! -x "$CXX" ] && echo "No \$CC ($CC) or \$CXX ($CXX)!" && exit 4
 
@@ -228,6 +249,16 @@ if [ -n "$BUILD_ERRORCODE" ]; then
     cd "$ORIGPWD"
     exit $BUILD_ERRORCODE
 fi
+
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    for f in st lo ea; do
+        cmp -s "$SUMMARIES_DIR/${f}_summary.txt" "tsan-logs/${f}_summary.txt" || {
+            echo "Error: tsan-logs/${f}_summary.txt was modified during the build of $CONFIG_TYPE"; cd "$ORIGPWD"; exit 1; }
+    done
+fi
+# Provenance next to the installed binaries (cwd is still the build dir, so the tsan-logs
+# listing refers to the summaries the compiler could see).
+write_build_info "$RESULT_DIR_NAME" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE"
 
 
 cd "$ORIGPWD"

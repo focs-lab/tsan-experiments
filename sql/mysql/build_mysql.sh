@@ -59,32 +59,19 @@ if [[ "$CONFIG_TYPE" == "orig" ]]; then
     # However, your previous edit hardcoded LLVM_ROOT_PATH/bin/clang.
     # Let's stick to your version's compiler logic for now, which means 'orig' also uses LLVM clang.
     # If you want 'orig' to use GCC, this section needs adjustment.
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-        TARGET_CXX="$LLVM_ROOT_PATH/bin/clang++"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        TARGET_CXX="clang++"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for 'orig'."
-    else
-        echo "Error: No suitable compiler (clang or gcc) found for 'orig' build."
-        exit 1
-    fi
+    # Same compiler as the TSan builds (tools/tsan_compiler.sh: hardened prototype in
+    # ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
+    # honoured if it really is that tree).
+    source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
+    TARGET_CC="$TSAN_CC"
+    TARGET_CXX="$TSAN_CXX"
 
 elif [[ "$CONFIG_TYPE" == tsan* ]]; then
     IS_TSAN_BUILD=true
-    # TSan builds MUST use clang
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-        TARGET_CXX="$LLVM_ROOT_PATH/bin/clang++"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        TARGET_CXX="clang++"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for TSan build."
-    else
-        echo "Error: Clang compiler not found. Set LLVM_ROOT_PATH or ensure 'clang' is in PATH for TSan builds."
-        exit 1
-    fi
+    # TSan builds MUST use the prototype clang (see the 'orig' branch for the selection rule).
+    source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
+    TARGET_CC="$TSAN_CC"
+    TARGET_CXX="$TSAN_CXX"
 
     BASE_TSAN_FLAGS="$FLAGS_TSAN_COMMON_VAL $FLAGS_COMMON_BASE_VAL"
     COMBINED_EXTRA_FLAGS=""
@@ -137,6 +124,24 @@ fi
 # Remove leading/trailing/extra spaces
 FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
 
+# Whole-program analysis summaries (hardened compiler: opt-in, read from <compile cwd>/tsan-logs/;
+# with the Ninja/Make generators the compile cwd is the top-level build directory).
+# USE_SUMMARIES=1 requires $SUMMARIES_DIR/{st,lo,ea}_summary.txt.
+USE_SUMMARIES="${USE_SUMMARIES:-0}"
+SUMMARIES_DIR="${SUMMARIES_DIR:-$(pwd)/summaries}"
+SUMMARY_NOTE="summaries: n/a"
+if [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    SUMMARY_NOTE="summaries: none (per-TU analyses only)"
+    if [ "$USE_SUMMARIES" = 1 ]; then
+        for f in st lo ea; do
+            [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || { echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty"; exit 1; }
+        done
+        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+        SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+    fi
+fi
+source "$(dirname "$0")/../../tools/write_build_info.sh"
+
 # Special CMake option for TSan:
 CMAKE_TSAN_OPTION=""
 [ "$IS_TSAN_BUILD" = true ] && CMAKE_TSAN_OPTION="-DWITH_TSAN=ON -DWITH_LIBEVENT=bundled"
@@ -163,6 +168,13 @@ if [ -d "$BUILD_DIR_NAME" ]; then
 	rm -rf "$BUILD_DIR_NAME"
 fi
 mkdir -p "$BUILD_DIR_NAME"
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    # Read-only: the EA pass rewrites ea_summary.txt per module otherwise (the failed open is
+    # non-fatal, so the whole-program file survives the build).
+    mkdir -p "$BUILD_DIR_NAME/tsan-logs"
+    cp "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt "$BUILD_DIR_NAME/tsan-logs/"
+    chmod 444 "$BUILD_DIR_NAME"/tsan-logs/*_summary.txt
+fi
 
 if [ -d "$RESULT_DIR_NAME" ]; then
 	echo "Removing existing result directory: $RESULT_DIR_NAME"
@@ -266,6 +278,16 @@ if [ ! -f "$RESULT_DIR_NAME/bin/mysqld" ]; then
 #    cd "$ORIGPWD"
     exit 2
 fi
+
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+    for f in st lo ea; do
+        cmp -s "$SUMMARIES_DIR/${f}_summary.txt" "$BUILD_DIR_NAME/tsan-logs/${f}_summary.txt" || {
+            echo "Error: tsan-logs/${f}_summary.txt was modified during the build of $CONFIG_TYPE"; exit 1; }
+    done
+fi
+# Provenance next to the installed binaries; run from the build dir so that the tsan-logs
+# listing is the one the compiler saw (the build dir itself is deleted below).
+( cd "$BUILD_DIR_NAME" && write_build_info "$RESULT_DIR_NAME" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE" )
 
 
 [ -d "$BUILD_DIR_NAME" ] && rm -rf "$BUILD_DIR_NAME"

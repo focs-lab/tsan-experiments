@@ -46,5 +46,8 @@
 [ ! -f "$SYSBENCH_SCRIPT_FILE" ] && echo "No file $SYSBENCH_SCRIPT_FILE found." && exit 1
 
 
-# TSan runtime options:
-export TSAN_OPTIONS="report_bugs=0 verbosity=0"
+# TSan runtime options.  The default silences reports (benchmarking); the preservation runner
+# (tools/preservation/run_preservation.py) starts mysqld itself with its own TSAN_OPTIONS
+# and only needs the clients quiet, but server-run*.sh callers can set
+# TSAN_OPTIONS_OVERRIDE to collect reports (e.g. "log_path=/abs/mysql.cfg.1 exitcode=0").
+export TSAN_OPTIONS="${TSAN_OPTIONS_OVERRIDE:-report_bugs=0 verbosity=0}"

@@ -48,12 +48,9 @@ FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
 FINAL_CFLAGS=""
 TARGET_CC=""
 
-if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-    TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-else
-    TARGET_CC="clang"
-    echo "INFO: LLVM_ROOT_PATH is not set or clang was not found there. Using system clang."
-fi
+# tools/tsan_compiler.sh sets TSAN_CC (honours LLVM_TSAN_ROOT, verifies LLVM_ROOT_PATH).
+source ../../tools/tsan_compiler.sh
+TARGET_CC="$TSAN_CC"
 
 if [[ "$CONFIG_TYPE" == "orig" ]]; then
     FINAL_CFLAGS="$FLAGS_COMMON_BASE_VAL"
@@ -83,14 +80,24 @@ fi
 
 # Remove leading/trailing spaces
 FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
-BUILD_SUBDIR="build/test-${CONFIG_TYPE}"
+# BUILD_ROOT lets A/B builds with another compiler (LLVM_TSAN_ROOT) live next to the default ones.
+BUILD_SUBDIR="${BUILD_ROOT:-build}/test-${CONFIG_TYPE}"
 
 echo "--- Preparing to build test: $CONFIG_TYPE ---"
 echo "Build directory: $BUILD_SUBDIR"
 echo "Compiler: $TARGET_CC"
 echo "Final CFLAGS: $FINAL_CFLAGS"
 
-# Create the directory for this configuration
+# Create the directory for this configuration.  A binary without build_info.txt predates
+# this script version (paper-era, March 2026): keep it under build/old-builds/ for provenance.
+if [ -f "$BUILD_SUBDIR/threadtest3" ] && [ ! -f "$BUILD_SUBDIR/build_info.txt" ]; then
+    OLD_STAMP=$(date -r "$BUILD_SUBDIR/threadtest3" +%Y%m%d)
+    OLD_DIR="${BUILD_ROOT:-build}/old-builds"
+    mkdir -p "$OLD_DIR"
+    echo "Archiving paper-era build $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+    rm -rf "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+    mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+fi
 mkdir -p "$BUILD_SUBDIR"
 
 # Compile the test
@@ -102,6 +109,10 @@ $TARGET_CC $FINAL_CFLAGS -DSQLITE_THREADSAFE=1 \
     -I "$SQLITE_SRC_DIR/src/" \
     -ldl -lpthread -lm \
     -o "$BUILD_SUBDIR/threadtest3"
+
+# Record compiler/tree/flags next to the binary (picked up by tools/preservation/run_preservation.py).
+source ../../tools/write_build_info.sh
+write_build_info "$BUILD_SUBDIR" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE"
 
 echo "--- Build for $CONFIG_TYPE completed successfully ---"
 echo "Executable is at: $BUILD_SUBDIR/threadtest3"

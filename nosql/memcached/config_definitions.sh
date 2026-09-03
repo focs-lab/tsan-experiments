@@ -27,3 +27,10 @@ CONFIG_DETAILS["tsan-all_stmt"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsa
                                  -mllvm -tsan-use-swmr \
                                  -mllvm -tsan-use-escape-analysis-global \
                                  -mllvm -tsan-use-active-thread-count"
+
+# Rebuttal (plan P2/P3): the four sound analyses only (EA+LO+STC+SWMR), i.e. AllOpt without
+# dominance elimination.  Same name in every app so that results are comparable.
+CONFIG_DETAILS["tsan-sound"]="-mllvm -tsan-use-escape-analysis-global \
+                              -mllvm -tsan-use-lock-ownership \
+                              -mllvm -tsan-use-single-threaded \
+                              -mllvm -tsan-use-swmr"

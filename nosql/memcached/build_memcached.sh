@@ -7,6 +7,20 @@ MEMCACHED_ARCHIVE="memcached-1.6.29.tar.gz"
 CONFIG_DEFINITIONS_FILE="config_definitions.sh"
 # --- End of Configurable Variables ---
 
+# Compiler: tools/tsan_compiler.sh sets TSAN_CC (honours LLVM_TSAN_ROOT, verifies LLVM_ROOT_PATH).
+source ../../tools/tsan_compiler.sh
+source ../../tools/write_build_info.sh
+
+# Whole-program analysis summaries (hardened compiler): USE_SUMMARIES=1 copies
+# $SUMMARIES_DIR/{st,lo,ea}_summary.txt into <build>/tsan-logs/ (the directory the
+# compiler reads from, relative to its CWD = the build dir) and adds
+# -mllvm -tsan-use-analysis-summaries.  Default: no summaries (per-TU analyses only).
+# The paper-era script copied summaries/* into the build root unconditionally for every
+# optimized config, which the paper-state compiler read from bare CWD filenames; the
+# hardened compiler ignores those.
+USE_SUMMARIES="${USE_SUMMARIES:-0}"
+SUMMARIES_DIR="${SUMMARIES_DIR:-summaries}"
+
 # Source the configuration definitions
 if [ -f "$CONFIG_DEFINITIONS_FILE" ]; then
     # shellcheck source=config_definitions.sh
@@ -54,27 +68,11 @@ TARGET_CC=""
 if [[ "$CONFIG_TYPE" == "orig" ]]; then
 #    IS_TSAN_BUILD=false
     FINAL_CFLAGS="$FLAGS_COMMON_BASE_VAL"
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for 'orig'."
-    else
-        echo "Error: No suitable compiler clang found for 'orig' build."
-        exit 1
-    fi
+    TARGET_CC="$TSAN_CC"
 
 elif [[ "$CONFIG_TYPE" == tsan* ]]; then
 #    IS_TSAN_BUILD=true
-    if [ -n "$LLVM_ROOT_PATH" ] && [ -x "$LLVM_ROOT_PATH/bin/clang" ]; then
-        TARGET_CC="$LLVM_ROOT_PATH/bin/clang"
-    elif command -v clang &> /dev/null; then
-        TARGET_CC="clang"
-        echo "INFO: LLVM_ROOT_PATH not set or clang not found there. Using system clang for TSan build."
-    else
-        echo "Error: Clang compiler not found. Set LLVM_ROOT_PATH or ensure 'clang' is in PATH for TSan builds."
-        exit 1
-    fi
+    TARGET_CC="$TSAN_CC"
 
     BASE_TSAN_FLAGS="$FLAGS_TSAN_COMMON_VAL $FLAGS_COMMON_BASE_VAL"
     COMBINED_EXTRA_FLAGS=""
@@ -127,10 +125,12 @@ else
 fi
 
 # Remove leading/trailing/extra spaces
-FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
+# EXTRA_TSAN_FLAGS: diagnostic flags appended verbatim (e.g. -mllvm -tsan-ea-flow-insensitive);
+# combine with BUILD_TAG so that such builds never replace the canonical memcached-<config> dir.
+FINAL_CFLAGS=$(echo "$FINAL_CFLAGS ${EXTRA_TSAN_FLAGS:-}" | xargs)
 
 # Directory for this specific build
-BUILD_DIR_NAME="memcached-${CONFIG_TYPE}"
+BUILD_DIR_NAME="memcached-${CONFIG_TYPE}${BUILD_TAG:-}"
 # Configuration script file name inside the build directory (as per your edit)
 CONFIG_SH_NAME="config_${CONFIG_TYPE}.sh"
 
@@ -139,10 +139,19 @@ echo "Target build directory: $BUILD_DIR_NAME"
 echo "Compiler: $TARGET_CC"
 echo "Final CFLAGS: $FINAL_CFLAGS"
 
-# Clean up
+# Clean up.  A previous build without build_info.txt predates the rebuttal work (paper-era
+# binary, compiler no longer available): archive it instead of deleting it.
 if [ -d "$BUILD_DIR_NAME" ]; then
-  echo "Removing existing directory: $BUILD_DIR_NAME"
-  rm -rf "$BUILD_DIR_NAME"
+  if [ ! -f "$BUILD_DIR_NAME/build_info.txt" ]; then
+    stamp=$(date -r "$BUILD_DIR_NAME/memcached" +%Y%m%d 2>/dev/null || date +%Y%m%d)
+    mkdir -p old-builds
+    echo "Archiving paper-era build $BUILD_DIR_NAME -> old-builds/$BUILD_DIR_NAME.$stamp"
+    rm -rf "old-builds/$BUILD_DIR_NAME.$stamp"
+    mv "$BUILD_DIR_NAME" "old-builds/$BUILD_DIR_NAME.$stamp"
+  else
+    echo "Removing existing directory: $BUILD_DIR_NAME"
+    rm -rf "$BUILD_DIR_NAME"
+  fi
 fi
 mkdir -p "$BUILD_DIR_NAME"
 
@@ -153,18 +162,37 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# Copy files from summaries directory to source directory,
-# except for tsan and orig configurations
-if [[ "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "tsan" ]]; then
-    echo "Copying files from summaries/ to $BUILD_DIR_NAME/..."
-    if [ -d "summaries" ]; then
-        cp -r summaries/* "$BUILD_DIR_NAME/"
-        echo "Files from summaries/ copied successfully."
+# Whole-program summaries for optimized TSan configurations (see USE_SUMMARIES above).
+SUMMARY_NOTE="summaries: none"
+if [[ "$USE_SUMMARIES" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "tsan" ]]; then
+    for f in st lo ea; do
+        if [ ! -s "$SUMMARIES_DIR/${f}_summary.txt" ]; then
+            echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty."
+            echo "       All three summaries must exist: with the flag, a missing st/lo file makes the"
+            echo "       compiler run the full analysis per TU and write a per-TU file instead."
+            exit 1
+        fi
+    done
+    SUMMARIES_ABS=$(readlink -f "$SUMMARIES_DIR")   # the post-build check runs from inside the build dir
+    SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
+    if [ -n "$SUMMARY_ID" ]; then
+        # Sound interface (tsan-audit fafbebedb41e+): files are tagged, read from -tsan-summary-dir with the
+        # matching -tsan-summary-id, never overwritten by a seeded compile; no tsan-logs/ copy needed.
+        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+        SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
+        echo "Using whole-program summaries from $SUMMARIES_DIR/ (id $SUMMARY_ID)."
     else
-        echo "Warning: summaries/ directory not found, skipping copy step."
+        mkdir -p "$BUILD_DIR_NAME/tsan-logs"
+        cp "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt "$BUILD_DIR_NAME/tsan-logs/"
+        # Legacy interface (before fafbebedb41e): read from tsan-logs/ in CWD. Read-only: EscapeAnalysis rewrote
+        # tsan-logs/ea_summary.txt from every TU it compiled, replacing the whole-program summary by the first TU's.
+        chmod 444 "$BUILD_DIR_NAME"/tsan-logs/*_summary.txt
+        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+        SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
+        echo "Using whole-program summaries from $SUMMARIES_DIR/ (copied to $BUILD_DIR_NAME/tsan-logs/, read-only)."
     fi
 else
-    echo "Skipping summaries/ copy for 'tsan' or 'orig' configuration."
+    echo "Building without whole-program summaries (USE_SUMMARIES=$USE_SUMMARIES)."
 fi
 
 cd "$BUILD_DIR_NAME"
@@ -211,6 +239,17 @@ if [ ! -f "memcached" ]; then
     cd ..
     exit 1
 fi
+
+# Verify that the summaries survived the build (EA tries to overwrite ea_summary.txt per TU).
+if [[ "$USE_SUMMARIES" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "tsan" && -z "${SUMMARY_ID:-}" && -d tsan-logs ]]; then
+    for f in st lo ea; do
+        if ! cmp -s "tsan-logs/${f}_summary.txt" "$SUMMARIES_ABS/${f}_summary.txt"; then
+            echo "Error: tsan-logs/${f}_summary.txt was modified during the build."
+            cd ..; exit 1
+        fi
+    done
+fi
+write_build_info . "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE"
 
 cd ..
 echo "--- Build for $CONFIG_TYPE completed successfully ---"
