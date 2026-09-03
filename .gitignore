@@ -44,3 +44,25 @@ old.*
 /sql/mysql/benchmysql/results
 /sql/mysql/benchmysql/vtune-results
 /sql/mysql/benchmysql/results*.csv
+
+# --- rebuttal-era (2026-09) experiment outputs and reproducible build artefacts
+__pycache__/
+**/old-builds/
+**/tsan-logs/
+/tools/preservation/results/
+/tools/preservation/launch_*.sh.log
+/tools/eviction-stress/bin*/
+/tools/eviction-stress/results/
+/nosql/redis/__results_redis__*
+/nosql/redis/redis-summaries-work/
+/nosql/memcached/memcached-summaries-work/
+/nosql/memcached/paper-builds/
+/projects/ffmpeg/results_ffmpeg_bak/
+/sql/mysql/benchmysql/PID_time_mysql_launched
+/sql/sqlite/build/
+/tools/notes/lo-probes-out/
+/projects/ffmpeg/old-builds
+/tools/eviction-counters/results/
+/nosql/memcached/summaries-*/
+/nosql/redis/summaries-*/
+/nosql/memcached/builds-*/
