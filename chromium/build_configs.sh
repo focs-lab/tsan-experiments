@@ -23,8 +23,9 @@ for cfg in $CFGS; do
   if [ -e "$out" ] && [ ! -L "$out" ]; then   # a paper-era or foreign build: archive by its stamp/date
     st=$(grep -m1 compiler_head "$out/build_info.txt" 2>/dev/null | awk '{print $2}'); st=${st:-$(date -r "$out" +%Y%m%d)}
     mkdir -p "$SRC/out/old-$st"; log "archiving $out -> out/old-$st/"; mv "$out" "$SRC/out/old-$st/chrome-$cfg"; fi
-  rm -rf "$tgt"; mkdir -p "$tgt"; ln -sfn "$tgt" "$out"
-  ./gen_args_gn.sh "$cfg" "$ROOT" "$out" > /dev/null
+  # keep a partial build of the same configuration on the scratch (ninja resumes); wipe anything else
+  want=$(./gen_args_gn.sh "$cfg" "$ROOT"); if [ -f "$tgt/args.gn" ] && [ "$(cat "$tgt/args.gn")" = "$want" ]; then log "resuming $cfg in $tgt"; else rm -rf "$tgt"; mkdir -p "$tgt"; fi
+  ln -sfn "$tgt" "$out"; printf '%s\n' "$want" > "$out/args.gn"
   wait_no_foreign_bench
   log "gn gen $cfg"; ( cd "$SRC" && gn gen "out/chrome-$cfg" ) >> "$LOGS/chrome-$cfg.$HASH.log" 2>&1 || { log "gn gen FAILED $cfg"; continue; }
   ( cd "$SRC" && gn args "out/chrome-$cfg" --list --short | grep -E "^(is_tsan|tsan_extra_cflags|clang_base_path)" ) | tee -a "$LOGS/chrome-$cfg.$HASH.log"
