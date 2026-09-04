@@ -1,0 +1,32 @@
+diff --git a/build/config/sanitizers/BUILD.gn b/build/config/sanitizers/BUILD.gn
+index 837bfbc6f2..a341b11c97 100644
+--- a/build/config/sanitizers/BUILD.gn
++++ b/build/config/sanitizers/BUILD.gn
+@@ -510,10 +510,8 @@ config("tsan_flags") {
+       tsan_ignorelist_path =
+           rebase_path("//tools/memory/tsan_v2/ignores.txt", root_build_dir)
+     }
+-    cflags = [
+-      "-fsanitize=thread",
+-      "-fsanitize-ignorelist=$tsan_ignorelist_path",
+-    ]
++    cflags = [ "-fsanitize=thread" ] + tsan_extra_cflags +
++             [ "-fsanitize-ignorelist=$tsan_ignorelist_path" ]
+   }
+ }
+ 
+diff --git a/build/config/sanitizers/sanitizers.gni b/build/config/sanitizers/sanitizers.gni
+index 0d1c9c5fda..c1e7138c52 100644
+--- a/build/config/sanitizers/sanitizers.gni
++++ b/build/config/sanitizers/sanitizers.gni
+@@ -27,6 +27,10 @@ declare_args() {
+   # Compile for Thread Sanitizer to find threading bugs.
+   is_tsan = false
+ 
++  # Extra compiler flags for the TSan instrumentation-reduction prototype (focs-lab), e.g.
++  # [ "-mllvm", "-tsan-use-escape-analysis-global" ]; set per out dir in args.gn.
++  tsan_extra_cflags = []
++
+   # Compile for Undefined Behaviour Sanitizer to find various types of
+   # undefined behaviour (excludes vptr checks).
+   is_ubsan = false
