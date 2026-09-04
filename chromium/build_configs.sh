@@ -7,7 +7,9 @@ cd "$(dirname "$0")"; HERE=$PWD
 HASH=${1:?hash}; shift; CFGS="${*:-tsan tsan-sound tsan-dom-ea-lo-st-swmr}"
 SRC=${SRC_DIR:-/extra/alexey/chromium/chromium/src}; ROOT=/extra/alexey/builds/tsan-dev-$HASH
 SCRATCH=${SCRATCH:-/home/alexey/tsan-experiments/.scratch}; LOGS=/extra/alexey/chromium/logs; mkdir -p "$LOGS" "$SCRATCH"
-JOBS=${NINJA_JOBS:-48}; NICE="nice -n 10 ionice -c2 -n7"
+JOBS=${NINJA_JOBS:-40}; NICE="nice -n 10 ionice -c2 -n7"
+# builds hold the P5 benchmark lock shared: concurrent with other builds, never with a benchmark
+exec 9>"${P5_LOCK:-/tmp/p5-bench.lock}"; flock -s 9
 export PATH=/extra/alexey/chromium/depot_tools:$PATH
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOGS/build_configs.$HASH.log"; }
 [ -x "$ROOT/bin/clang" ] || { echo "no frozen copy $ROOT"; exit 1; }
