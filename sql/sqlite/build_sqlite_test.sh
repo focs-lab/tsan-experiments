@@ -81,7 +81,20 @@ fi
 # Remove leading/trailing spaces
 FINAL_CFLAGS=$(echo "$FINAL_CFLAGS" | xargs)
 # BUILD_ROOT lets A/B builds with another compiler (LLVM_TSAN_ROOT) live next to the default ones.
-BUILD_SUBDIR="${BUILD_ROOT:-build}/test-${CONFIG_TYPE}"
+# BUILD_TAG (e.g. -wp) is appended to the directory name only (run_sqlite_test.sh <cfg><tag> finds it).
+BUILD_SUBDIR="${BUILD_ROOT:-build}/test-${CONFIG_TYPE}${BUILD_TAG:-}"
+
+# Whole-program summaries (sound interface): USE_SUMMARIES=1 SUMMARIES_DIR=<dir from gen_summaries.sh>.
+SUMMARY_NOTE="summaries: none"
+if [[ "${USE_SUMMARIES:-0}" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "tsan" ]]; then
+    for f in st lo ea; do [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || { echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty."; exit 1; }; done
+    SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
+    [ -n "$SUMMARY_ID" ] || { echo "Error: $SUMMARIES_DIR/st_summary.txt has no '# tsan-summary-id:' header."; exit 1; }
+    SUMMARIES_ABS=$(readlink -f "$SUMMARIES_DIR")
+    FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+    SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
+    echo "Using whole-program summaries from $SUMMARIES_DIR/ (id $SUMMARY_ID)."
+fi
 
 echo "--- Preparing to build test: $CONFIG_TYPE ---"
 echo "Build directory: $BUILD_SUBDIR"
@@ -112,7 +125,7 @@ $TARGET_CC $FINAL_CFLAGS -DSQLITE_THREADSAFE=1 \
 
 # Record compiler/tree/flags next to the binary (picked up by tools/preservation/run_preservation.py).
 source ../../tools/write_build_info.sh
-write_build_info "$BUILD_SUBDIR" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE"
+write_build_info "$BUILD_SUBDIR" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE"
 
 echo "--- Build for $CONFIG_TYPE completed successfully ---"
 echo "Executable is at: $BUILD_SUBDIR/threadtest3"

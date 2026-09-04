@@ -11,7 +11,7 @@ RESULTS_DIR = 'results'
 # The non-instrumented baseline file (e.g., compiled with -O2)
 NON_INSTRUMENTED_BASELINE_FILENAME = 'orig.log'
 # The default TSan instrumentation baseline file
-TSAN_BASELINE_FILENAME = 'tsan.txt'
+TSAN_BASELINE_FILENAME = 'tsan.log'
 
 
 def parse_log_file(filepath):

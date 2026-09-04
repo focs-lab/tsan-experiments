@@ -6,14 +6,17 @@ set -e
 FF_TEST_VIDEO="./input/WatchingEyeTexture.mkv"
 [ ! -f "$FF_TEST_VIDEO" ] && echo "No video file found at $FF_TEST_VIDEO" && exit 1
 
-FF_BUILD_LIST_STR=$(ls -d ffmpeg-orig ffmpeg-tsan* 2>/dev/null | xargs)
+# FF_BUILD_LIST (env) restricts the builds, e.g. FF_BUILD_LIST="ffmpeg-tsan ffmpeg-tsan-sound".
+FF_BUILD_LIST_STR="${FF_BUILD_LIST:-$(ls -d ffmpeg-orig ffmpeg-tsan* 2>/dev/null | xargs)}"
 [ -z "$FF_BUILD_LIST_STR" ] && echo "No FFmpeg builds found (directory pattern \"ffmpeg-tsan* ffmpeg-orig\")." && exit 2
+# Performance runs: no race reports (the paper's setting for every other benchmark); override via env.
+export TSAN_OPTIONS="${TSAN_OPTIONS:-report_bugs=0}"
 
 #FF_BUILD_LIST_STR="ffmpeg-orig ffmpeg-tsan ffmpeg-tsan-stmt ffmpeg-tsan-dom_peeling ffmpeg-tsan-dom"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
 #FF_BUILD_LIST_STR="ffmpeg-tsan-dom_peeling-ea-lo-st-swmr ffmpeg-tsan-dom_peeling-ea-lo-st-swmr-stmt"; echo -e "\e[93mNote: \$FF_BUILD_LIST_STR overridden to '$FF_BUILD_LIST_STR'.\e[0m" && echo "(3-sec delay...)" && sleep 3
 
-# Number of runs to average the results (force set to 1 with `--trace`):
-RUNS_COUNT=1
+# Number of runs to average the results (force set to 1 with `--trace`); env RUNS_COUNT overrides.
+RUNS_COUNT="${RUNS_COUNT:-1}"
 
 [ -z "$FFMPEG_BENCH_NPROC_COUNT" ] && FFMPEG_BENCH_NPROC_COUNT="$(nproc)"
 
@@ -179,7 +182,7 @@ for CODEC_KEY in "${!CODECS[@]}"; do
 		done
 
 		if [ "$SUCCESSFUL_RUNS" -gt 1 ]; then
-			STDDEV_TIME=$(echo "scale=4; sqrt($SUM_SQ_DIFF / ($SUCCESSFUL_RUNS))" | bc)
+			STDDEV_TIME=$(echo "scale=4; sqrt($SUM_SQ_DIFF / ($SUCCESSFUL_RUNS - 1))" | bc)   # sample stddev
 		else
 			STDDEV_TIME=0
 		fi

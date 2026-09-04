@@ -148,9 +148,12 @@ CMAKE_TSAN_OPTION=""
 
 
 # Directory for this specific build
-BUILD_DIR_NAME="/dev/shm/mysql-${CONFIG_TYPE}"
-#BUILD_DIR_NAME="mysql-build-${CONFIG_TYPE}"
-RESULT_DIR_NAME="$(pwd)/mysql-${CONFIG_TYPE}"
+# Compile tree on the SSD scratch (BUILD_SCRATCH; /dev/shm is RAM shared with everyone on the machine),
+# install prefix under INSTALL_ROOT (e.g. /extra/...) with a symlink mysql-<cfg> here so the benchmark
+# scripts keep finding ../mysql-<cfg>/bin.
+BUILD_DIR_NAME="${BUILD_SCRATCH:-$(pwd)/../../.scratch}/mysql-${CONFIG_TYPE}${BUILD_TAG:-}"
+RESULT_LINK="$(pwd)/mysql-${CONFIG_TYPE}${BUILD_TAG:-}"
+RESULT_DIR_NAME="${INSTALL_ROOT:-$(pwd)}/mysql-${CONFIG_TYPE}${BUILD_TAG:-}"
 
 
 # Configuration script file name inside the build directory (as per your edit)
@@ -176,11 +179,14 @@ if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" !
     chmod 444 "$BUILD_DIR_NAME"/tsan-logs/*_summary.txt
 fi
 
-if [ -d "$RESULT_DIR_NAME" ]; then
-	echo "Removing existing result directory: $RESULT_DIR_NAME"
-	rm -rf "$RESULT_DIR_NAME"
-fi
+# Never overwrite a previous build: builds of another compiler are archived under old-builds/ (the
+# March paper builds have no build_info.txt and get a date stamp), same-compiler builds are replaced.
+CUR_STAMP=$(compiler_stamp_of "$TARGET_CC")
+if [ -L "$RESULT_LINK" ]; then rm -f "$RESULT_LINK"; fi
+retire_build_dir "$RESULT_DIR_NAME" "$(dirname "$RESULT_DIR_NAME")/old-builds" "mysql-${CONFIG_TYPE}${BUILD_TAG:-}" "$CUR_STAMP"
+[ "$RESULT_LINK" = "$RESULT_DIR_NAME" ] || retire_build_dir "$RESULT_LINK" "$(pwd)/old-builds" "mysql-${CONFIG_TYPE}${BUILD_TAG:-}" "$CUR_STAMP"
 mkdir -p "$RESULT_DIR_NAME"
+[ "$RESULT_LINK" = "$RESULT_DIR_NAME" ] || ln -sfn "$RESULT_DIR_NAME" "$RESULT_LINK"
 
 #echo "Extracting $PROJECT_SRC_ARCHIVE into $BUILD_DIR_NAME..."
 #tar -xzf "$PROJECT_SRC_ARCHIVE" -C "$BUILD_DIR_NAME" --strip-components=1

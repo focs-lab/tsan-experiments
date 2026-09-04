@@ -139,9 +139,11 @@ fi
 
 
 # Directory for this specific build
-BUILD_DIR_NAME="/dev/shm/ffmpeg-${CONFIG_TYPE}"
-#BUILD_DIR_NAME="ffmpeg-build-${CONFIG_TYPE}"
-RESULT_DIR_NAME="$(pwd)/ffmpeg-${CONFIG_TYPE}"
+# Compile tree on the SSD scratch (not /dev/shm, which is RAM shared with everyone); install prefix
+# under INSTALL_ROOT (e.g. /extra/...) with a symlink ffmpeg-<cfg> here for the benchmark scripts.
+BUILD_DIR_NAME="${BUILD_SCRATCH:-$(pwd)/../../.scratch}/ffmpeg-${CONFIG_TYPE}${BUILD_TAG:-}"
+RESULT_LINK="$(pwd)/ffmpeg-${CONFIG_TYPE}${BUILD_TAG:-}"
+RESULT_DIR_NAME="${INSTALL_ROOT:-$(pwd)}/ffmpeg-${CONFIG_TYPE}${BUILD_TAG:-}"
 
 
 # Configuration script file name inside the build directory (as per your edit)
@@ -158,15 +160,15 @@ if [ -d "$BUILD_DIR_NAME" ]; then
   echo "Removing existing directory: $BUILD_DIR_NAME"
   rm -rf "$BUILD_DIR_NAME"
 fi
-# An install prefix without build_info.txt predates this script version (paper-era, March 2026):
-# keep it under old-builds/ (a symlink to /extra, ~1 GB per prefix) instead of overwriting it in place.
-if [ -f "$RESULT_DIR_NAME/bin/ffmpeg" ] && [ ! -f "$RESULT_DIR_NAME/build_info.txt" ]; then
-  OLD_STAMP=$(date -r "$RESULT_DIR_NAME/bin/ffmpeg" +%Y%m%d)
-  mkdir -p old-builds
-  echo "Archiving paper-era build $RESULT_DIR_NAME -> old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
-  rm -rf "old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
-  mv "$RESULT_DIR_NAME" "old-builds/ffmpeg-${CONFIG_TYPE}.$OLD_STAMP"
-fi
+# Never overwrite a previous prefix: another compiler's build is archived under old-builds/
+# (paper-era prefixes without build_info.txt get a date stamp), a same-compiler build is replaced.
+source "$(pwd)/../../tools/write_build_info.sh"
+CUR_STAMP=$(compiler_stamp_of "$TARGET_CC")
+if [ -L "$RESULT_LINK" ]; then rm -f "$RESULT_LINK"; fi
+retire_build_dir "$RESULT_DIR_NAME" "$(dirname "$RESULT_DIR_NAME")/old-builds" "ffmpeg-${CONFIG_TYPE}${BUILD_TAG:-}" "$CUR_STAMP"
+[ "$RESULT_LINK" = "$RESULT_DIR_NAME" ] || retire_build_dir "$RESULT_LINK" "$(pwd)/old-builds" "ffmpeg-${CONFIG_TYPE}${BUILD_TAG:-}" "$CUR_STAMP"
+mkdir -p "$RESULT_DIR_NAME"
+[ "$RESULT_LINK" = "$RESULT_DIR_NAME" ] || ln -sfn "$RESULT_DIR_NAME" "$RESULT_LINK"
 mkdir -p "$BUILD_DIR_NAME"
 
 echo "Extracting $FFMPEG_ARCHIVE into $BUILD_DIR_NAME..."

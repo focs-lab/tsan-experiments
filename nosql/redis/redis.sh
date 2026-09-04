@@ -459,15 +459,14 @@ if [ "$COMPILE" = true ]; then
             TSAN_FLAGS=""
             SUMMARY_NOTE="summaries: none (per-TU analyses only)"
             if [ "$USE_SUMMARIES" = 1 ]; then
-                # The hardened compiler reads tsan-logs/<x>_summary.txt from its CWD (src/)
-                # only with -tsan-use-analysis-summaries.  Files are made read-only because
-                # the EA pass rewrites ea_summary.txt per module otherwise (open fails
-                # non-fatally on a 444 file, so the whole-program file survives).
-                mkdir -p tsan-logs
-                cp "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt tsan-logs/
-                chmod 444 tsan-logs/*_summary.txt
-                TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-analysis-summaries"
-                SUMMARY_NOTE="summaries: $SUMMARIES_DIR (st $(md5sum tsan-logs/st_summary.txt | cut -c1-8), lo $(md5sum tsan-logs/lo_summary.txt | cut -c1-8), ea $(md5sum tsan-logs/ea_summary.txt | cut -c1-8))"
+                # Sound summaries interface (tsan-dev fafbebedb41e+): files are tagged with
+                # "# tsan-summary-id: <tag>", read from -tsan-summary-dir with the matching
+                # -tsan-summary-id, never overwritten by a seeded compile.
+                SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
+                [ -n "$SUMMARY_ID" ] || { echo "Error: $SUMMARIES_DIR/st_summary.txt has no '# tsan-summary-id:' header (regenerate with gen_summaries.sh)" >&2; exit 1; }
+                SUMMARIES_ABS=$(readlink -f "$SUMMARIES_DIR")
+                TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+                SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
             fi
 
             # Option name -> flags, matched per '-'-separated token (the paper-era substring
@@ -509,7 +508,7 @@ if [ "$COMPILE" = true ]; then
 
         ensure_executable redis-server "redis-server for '$OPTION'" || { echo "Hint: build log is $BUILD_LOG" >&2; exit 1; }
 
-        if [ "$USE_SUMMARIES" = 1 ] && [[ "$OPTION" != "orig" && "$OPTION" != "tsan" ]]; then
+        if [ "$USE_SUMMARIES" = 1 ] && [[ "$OPTION" != "orig" && "$OPTION" != "tsan" ]] && [ -z "${SUMMARY_ID:-}" ]; then   # legacy tsan-logs/ copy only
             for f in st lo ea; do
                 cmp -s "$SUMMARIES_DIR/${f}_summary.txt" "tsan-logs/${f}_summary.txt" || {
                     echo "Error: tsan-logs/${f}_summary.txt was modified during the build of '$OPTION'" >&2; exit 1; }
@@ -615,8 +614,8 @@ if [ "$TESTS" = true ]; then
         
         sleep 5
         
-        # For 'orig' build, append "0" to request count, effectively multiplying it by 10.
-        [[ "$OPTION" = "orig" ]] && L="0" || L=""
+        # Paper-era: 'orig' got 10x the requests (REDIS_ORIG_MULT=10); performance sweeps use 1 (same N).
+        [[ "$OPTION" = "orig" && "${REDIS_ORIG_MULT:-1}" = "10" ]] && L="0" || L=""
         
         run "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}" || exit 1
         run "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}" || exit 1

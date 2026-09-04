@@ -66,3 +66,12 @@ __pycache__/
 /nosql/memcached/summaries-*/
 /nosql/redis/summaries-*/
 /nosql/memcached/builds-*/
+/.scratch/
+/tools/perf/results/
+/tools/perf/*.log
+/nosql/memcached/summaries-*/
+/sql/sqlite/summaries-*/
+/sql/sqlite/sqlite-summaries-work/
+/sql/mysql/old-builds/
+/projects/ffmpeg/old-builds
+/nosql/memcached/paper-builds/

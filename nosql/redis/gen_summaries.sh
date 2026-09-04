@@ -32,8 +32,14 @@ cd "$(dirname "$0")"
 source ../../tools/tsan_compiler.sh
 CLANG="$TSAN_CC"; OPT="$TSAN_OPT"; LLVM_LINK="$TSAN_LLVM_ROOT/bin/llvm-link"
 for t in "$CLANG" "$OPT" "$LLVM_LINK"; do [ -x "$t" ] || { echo "missing $t"; exit 1; }; done
-TREE=$(cd "$(dirname "$(readlink -f "$CLANG")")" && while [ ! -e .git ] && [ "$PWD" != / ]; do cd ..; done; pwd)
-HEAD=$(git -C "$TREE" rev-parse --short HEAD)
+# Frozen per-hash copies (/extra/alexey/builds/<name>/) are not git trees: take the id from TSAN_AUDIT_HASH.
+if [ -f "$TSAN_LLVM_ROOT/TSAN_AUDIT_HASH" ]; then
+  TREE="$TSAN_LLVM_ROOT"; HEAD=$(head -1 "$TSAN_LLVM_ROOT/TSAN_AUDIT_HASH" | grep -oE "[0-9a-f]{12}" | head -1)
+else
+  TREE=$(cd "$(dirname "$(readlink -f "$CLANG")")" && while [ ! -e .git ] && [ "$PWD" != / ]; do cd ..; done; pwd)
+  HEAD=$(git -C "$TREE" rev-parse --short HEAD 2>/dev/null || "$CLANG" --version | grep -oE "[0-9a-f]{40}" | cut -c1-12)
+fi
+SUMMARY_ID="${SUMMARY_ID:-$HEAD}"
 OUT="${1:-summaries-$HEAD}"
 [[ "$OUT" = /* ]] || OUT="$PWD/$OUT"
 ARCHIVE="${ARCHIVE:-redis-7.0.15.tar.gz}"
@@ -45,7 +51,7 @@ NOINSTR_FLAGS="-w -mllvm -tsan-instrument-memory-accesses=0 -mllvm -tsan-instrum
   -mllvm -tsan-instrument-atomics=0 -mllvm -tsan-instrument-memintrinsics=0"
 
 echo "compiler: $CLANG ($("$CLANG" --version | head -1))"
-echo "tree: $TREE branch=$(git -C "$TREE" branch --show-current) head=$HEAD"
+echo "tree: $TREE head=$HEAD"
 echo "ninja: $(ninja -n -C "$TSAN_LLVM_ROOT" 2>/dev/null | tail -1)"
 
 rm -rf "$WORK"; mkdir -p "$WORK"
@@ -77,27 +83,29 @@ echo "linked $(grep -c '^define ' redis-server.ll) functions into redis-server.l
 
 # Run the analyses from a clean directory; with the flag on and no file present each pass
 # performs the full analysis and writes tsan-logs/<x>_summary.txt.
+# Sound summaries interface: -tsan-whole-program on the linked IR (asserts nothing outside the module calls in
+# except through taken addresses and main), files written to -tsan-summary-dir tagged with -tsan-summary-id.
 rm -rf summarize; mkdir summarize; cd summarize
+mkdir -p "$OUT"
 for pass in single-threaded lock-ownership escape-analysis-global; do
-  "$OPT" -disable-output -passes="print<$pass>" -tsan-use-analysis-summaries ../redis-server.ll \
+  "$OPT" -disable-output -passes="print<$pass>" -tsan-use-analysis-summaries -tsan-whole-program \
+      -tsan-summary-dir="$OUT" -tsan-summary-id="$SUMMARY_ID" ../redis-server.ll \
       > "$pass.print.txt" 2>&1 || { echo "opt print<$pass> failed, see $WORK/src/summarize/$pass.print.txt"; exit 1; }
 done
-ls -l tsan-logs/
-for f in st lo ea; do [ -s "tsan-logs/${f}_summary.txt" ] || echo "warning: tsan-logs/${f}_summary.txt missing or empty"; done
+ls -l "$OUT"
+for f in st lo ea; do [ -s "$OUT/${f}_summary.txt" ] || echo "warning: $OUT/${f}_summary.txt missing or empty"; done
 cd ../../..
-
-mkdir -p "$OUT"
-cp "$WORK"/src/summarize/tsan-logs/*_summary.txt "$OUT"/
 cp "$WORK"/src/summarize/*.print.txt "$OUT"/
 cp "$WORK"/src/compile-lines.txt "$OUT"/
 {
   echo "date: $(date -Iseconds)"
   echo "compiler: $(readlink -f "$CLANG") ($("$CLANG" --version | head -1))"
-  echo "tree: $TREE branch=$(git -C "$TREE" branch --show-current) head=$(git -C "$TREE" rev-parse HEAD) dirty=$(git -C "$TREE" status --porcelain --untracked-files=no | wc -l)"
+  echo "tree: $TREE head=$HEAD $(git -C "$TREE" branch --show-current 2>/dev/null | sed 's/^/branch=/')"
+  echo "summary_id: $SUMMARY_ID"
   echo "archive: $ARCHIVE ($(md5sum "$ARCHIVE" | cut -c1-8))"
   echo "ir_flags: real compile lines (compile-lines.txt) + $NOINSTR_FLAGS"
   echo "modules: $(echo $MODULES | tr '\n' ' ')"
-  echo "opt: -passes=print<single-threaded|lock-ownership|escape-analysis-global> -tsan-use-analysis-summaries (ST -> LO -> EA, clean dir)"
+  echo "opt: -passes=print<single-threaded|lock-ownership|escape-analysis-global> -tsan-use-analysis-summaries -tsan-whole-program -tsan-summary-dir=$OUT -tsan-summary-id=$SUMMARY_ID (ST -> LO -> EA)"
   echo "sizes: $(wc -l "$OUT"/*_summary.txt | tr '\n' ';')"
 } > "$OUT/PROVENANCE.txt"
 cat "$OUT/PROVENANCE.txt"

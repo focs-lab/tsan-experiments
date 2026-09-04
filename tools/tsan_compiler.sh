@@ -20,4 +20,4 @@ else
 fi
 _tsan_is_prototype "$TSAN_LLVM_ROOT" || { echo "tsan_compiler.sh: $TSAN_LLVM_ROOT/bin/clang is not the focs-lab TSan prototype" >&2; return 1 2>/dev/null || exit 1; }
 export TSAN_LLVM_ROOT TSAN_CC="$TSAN_LLVM_ROOT/bin/clang" TSAN_CXX="$TSAN_LLVM_ROOT/bin/clang++" TSAN_OPT="$TSAN_LLVM_ROOT/bin/opt"
-echo "tsan_compiler.sh: using $TSAN_CC ($("$TSAN_CC" --version | head -1))" >&2
+echo "tsan_compiler.sh: using $TSAN_CC ($("$TSAN_CC" --version | head -1))$([ -f "$TSAN_LLVM_ROOT/TSAN_AUDIT_HASH" ] && echo " [frozen copy, TSAN_AUDIT_HASH=$(head -1 "$TSAN_LLVM_ROOT/TSAN_AUDIT_HASH" | cut -c1-12)]")" >&2

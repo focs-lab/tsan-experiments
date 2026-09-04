@@ -57,8 +57,11 @@ for arg in "$@"; do
 done
 
 
-BUILD_DIR="build/test-$CONFIG_TYPE"
+BUILD_DIR="${BUILD_ROOT:-build}/test-$CONFIG_TYPE"
 EXECUTABLE_PATH="$BUILD_DIR/threadtest3"
+# Stale state from earlier runs/compiles in this directory: summary files the compiler may pick up
+# (tsan-logs/ is the legacy default summary dir), and databases left by an aborted threadtest3.
+rm -rf tsan-logs lo_summary.txt st_summary.txt ea_summary.txt test.db test.db-* test_sv.db test_sv.db-* 2>/dev/null
 
 # --- Result and Output Setup ---
 RESULTS_DIR="results"

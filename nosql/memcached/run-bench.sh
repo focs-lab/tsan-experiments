@@ -1,13 +1,10 @@
 #!/bin/bash
 
-NTHREADS=10
-NTESTS=5
+NTHREADS=${NTHREADS:-10}
+NTESTS=${NTESTS:-5}          # memtier iterations (-x); the same for every configuration
 MEMTIER_EXTRA_ARGS=""
 MEMCACHED_TYPE=$(cat memcached_type)
-
-if [ "$MEMCACHED_TYPE" = "tsan" ]; then
-    NTESTS=$((NTESTS * 5))
-fi
+# (the paper-era "x5 iterations when the type is tsan" rule was removed: unequal N inside the comparison)
 
 # Check for trace argument
 for arg in "$@"; do

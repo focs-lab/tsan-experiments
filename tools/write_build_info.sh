@@ -24,7 +24,13 @@ write_build_info() {
     echo "compiler: $ccpath"
     echo "compiler_version: $("$cc" --version 2>/dev/null | head -1)"
     echo "compiler_mtime: $(date -Iseconds -r "$ccpath" 2>/dev/null)"
-    if [ -d "$tree/.git" ]; then
+    local root; root=$(dirname "$(dirname "$ccpath")")
+    if [ -f "$root/TSAN_AUDIT_HASH" ]; then
+      # frozen per-hash copy (/extra/alexey/builds/<lane>-<hash>/): no git tree, the stamp files are the provenance
+      echo "compiler_tree: $root (frozen copy)"
+      echo "compiler_head: $(head -1 "$root/TSAN_AUDIT_HASH" | grep -oE '[0-9a-f]{12,40}' | head -1)"
+      [ -f "$root/CONSOLIDATED_HASH" ] && echo "compiler_consolidated: $(head -1 "$root/CONSOLIDATED_HASH")"
+    elif [ -d "$tree/.git" ]; then
       echo "compiler_tree: $tree"
       echo "compiler_branch: $(git -C "$tree" branch --show-current 2>/dev/null)"
       echo "compiler_head: $(git -C "$tree" rev-parse HEAD 2>/dev/null)"
@@ -40,3 +46,26 @@ write_build_info() {
     for line in "$@"; do echo "$line"; done
   } > "$out_dir/build_info.txt"
 }
+
+# build_stamp_of <dir>: 12-hex compiler stamp recorded in <dir>/build_info.txt ("" if none / paper-era).
+build_stamp_of() {
+  [ -f "$1/build_info.txt" ] && grep -m1 "^compiler_version:" "$1/build_info.txt" | grep -oE '[0-9a-f]{40}' | cut -c1-12
+}
+
+# retire_build_dir <dir> <old_builds_dir> <name> <current_stamp>: move an existing build out of the way
+# before rebuilding — archived as <old_builds_dir>/<name>.<stamp|date> when it was built by another
+# compiler (or is paper-era, no build_info.txt), deleted when it carries the current stamp (same content).
+retire_build_dir() {
+  local dir="$1" old="$2" name="$3" cur="$4" stamp
+  [ -e "$dir" ] || return 0
+  stamp=$(build_stamp_of "$dir")
+  if [ -n "$stamp" ] && [ "$stamp" = "$cur" ]; then
+    echo "Removing previous build of the same compiler ($stamp): $dir"; rm -rf "$dir"; return 0
+  fi
+  [ -n "$stamp" ] || stamp=$(date -r "$dir" +%Y%m%d)
+  mkdir -p "$old"; rm -rf "$old/$name.$stamp"
+  echo "Archiving previous build $dir -> $old/$name.$stamp"; mv "$dir" "$old/$name.$stamp"
+}
+
+# compiler_stamp_of <clang>: the 12-hex stamp of a compiler binary's version string.
+compiler_stamp_of() { "$1" --version 2>/dev/null | head -1 | grep -oE '[0-9a-f]{40}' | cut -c1-12; }

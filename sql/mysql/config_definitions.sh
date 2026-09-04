@@ -15,7 +15,7 @@ CONFIG_DETAILS["tsan-stmt"]="-mllvm -tsan-use-active-thread-count"
 CONFIG_DETAILS["tsan-swmr"]="-mllvm -tsan-use-swmr"
 CONFIG_DETAILS["tsan-ea"]="-mllvm -tsan-use-escape-analysis-global"
 CONFIG_DETAILS["tsan-dom"]="-mllvm -tsan-use-dominance-analysis"
-CONFIG_DETAILS["tsan-dompeeling"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
+CONFIG_DETAILS["tsan-dom_peeling"]="-mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true"
 
 # Rebuttal (plan P2/P3): the four sound analyses only (EA+LO+STC+SWMR), i.e. AllOpt without
 # dominance elimination.  Same name in every app so that results are comparable.
