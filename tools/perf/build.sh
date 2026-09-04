@@ -1,0 +1,59 @@
+#!/bin/bash
+# build.sh — build the P5 configurations of one application from a frozen compiler copy.
+# Usage: ./build.sh <app> <hash> [cfg ...]            (default: Stage A set for the app; see configs.sh)
+#   env: P5_OUT (results root; default results/<date>-<hash>), NPROC_<APP> (jobs), P5_SKIP_EXISTING=1
+# Builds run in user.slice under nice/ionice, pause while a foreign `bench-*` unit is active, and write
+# <out>/build/<app>-<cfg>.log, <out>/static-counts.csv and a build_info.txt stamp check.
+set -uo pipefail
+cd "$(dirname "$0")"; source ./lib.sh; source ./configs.sh
+APP=${1:?app}; HASH=${2:?hash}; shift 2
+CFGS="${*:-$(p5_configs_for "$APP" "$P5_STAGE_A")}"
+ROOT=$(p5_compiler_root "$HASH") || exit 1
+OUT="${P5_OUT:-$P5_DIR/results/$(date +%F)-$HASH}"; mkdir -p "$OUT/build"
+export LLVM_TSAN_ROOT="$ROOT" BUILD_SCRATCH="$P5_SCRATCH"
+mkdir -p "$P5_SCRATCH" "$P5_INSTALL_ROOT"
+APPDIR=$(p5_app_dir "$APP")
+jobs_var="NPROC_$(echo "$APP" | tr a-z A-Z)"; JOBS="${!jobs_var:-}"
+case "$APP" in mysql) JOBS=${JOBS:-56};; ffmpeg) JOBS=${JOBS:-32};; *) JOBS=${JOBS:-8};; esac
+NICE="nice -n 10 ionice -c2 -n7"
+wait_no_foreign_bench() { while p5_bench_active; do p5_log "a bench-* unit is active (we would be on 8 CPUs); waiting 5 min"; sleep 300; done; }
+summaries_dir() { echo "$APPDIR/summaries-$HASH"; }
+ensure_summaries() {
+  [ -s "$(summaries_dir)/st_summary.txt" ] && grep -q "tsan-summary-id: $HASH" "$(summaries_dir)/st_summary.txt" && return 0
+  p5_log "generating whole-program summaries for $APP ($HASH)"
+  ( cd "$APPDIR" && SUMMARY_ID="$HASH" ./gen_summaries.sh "$(summaries_dir)" ) > "$OUT/build/$APP-summaries.log" 2>&1 || p5_die "gen_summaries failed for $APP (see $OUT/build/$APP-summaries.log)"
+}
+build_one() {  # cfg
+  local cfg=$1 base tag log rc bin stamp
+  base=$(p5_base "$cfg"); tag=$(p5_tag "$cfg"); log="$OUT/build/$APP-$cfg.log"
+  bin=$(p5_binary "$APP" "$cfg")
+  if [ "${P5_SKIP_EXISTING:-0}" = 1 ] && [ -x "$bin" ] && [ "$(p5_stamp_of_dir "$(p5_build_dir "$APP" "$cfg")")" = "$HASH" ]; then
+    p5_log "skip $APP $cfg (already built with $HASH)"; return 0; fi
+  local env=(USE_SUMMARIES=0 NPROC="$JOBS")
+  if [ -n "$tag" ]; then ensure_summaries; env=(USE_SUMMARIES=1 SUMMARIES_DIR="$(summaries_dir)" BUILD_TAG="$tag" NPROC="$JOBS"); fi
+  wait_no_foreign_bench
+  p5_log "build $APP $cfg (jobs $JOBS) -> $log"
+  local t0=$SECONDS
+  case "$APP" in
+    memcached) ( cd "$APPDIR" && env "${env[@]}" $NICE ./build_memcached.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    redis)     ( cd "$APPDIR" && env "${env[@]}" BUILD_OPTIONS="$(p5_redis_name "$cfg")" $NICE taskset -c 4-$((3+JOBS)) ./redis.sh --compile-only ) > "$log" 2>&1; rc=$?;;
+    sqlite)    ( cd "$APPDIR" && env "${env[@]}" $NICE ./build_sqlite_test.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    mysql)     ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/mysql" $NICE ./build_mysql.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    ffmpeg)    ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/ffmpeg" $NICE ./build_ffmpeg.sh "$base" ) > "$log" 2>&1; rc=$?;;
+  esac
+  local dt=$((SECONDS - t0))
+  [ $rc = 0 ] && [ -x "$bin" ] || { p5_log "BUILD FAILED $APP $cfg rc=$rc (${dt}s) see $log"; echo "$APP,$cfg,FAILED,$rc,$dt" >> "$OUT/build/builds.csv"; return 1; }
+  stamp=$(p5_stamp_of_dir "$(p5_build_dir "$APP" "$cfg")")
+  [ "$stamp" = "$HASH" ] || [ "$cfg" = orig ] || { p5_log "STAMP MISMATCH $APP $cfg: build_info says '$stamp'"; return 1; }
+  local sites total
+  read -r sites total <<< "$(p5_static_count "$APP" "$bin")"
+  echo "$APP,$cfg,$HASH,$sites,$total,$(p5_sha256 "$bin"),$dt" >> "$OUT/static-counts.csv"
+  echo "$APP,$cfg,ok,0,$dt" >> "$OUT/build/builds.csv"
+  p5_log "built $APP $cfg in ${dt}s: $sites memory-access sites ($total tsan calls)"
+}
+# builds of different apps run concurrently (shared lock); a benchmark holds the lock exclusively, so no
+# build starts while one of our benchmarks runs and no benchmark starts while a build runs
+exec 9>"$P5_LOCK"; flock -s 9
+[ -f "$OUT/static-counts.csv" ] || echo "app,config,hash,memory_access_sites,tsan_calls_total,sha256,build_seconds" > "$OUT/static-counts.csv"
+fail=0; for c in $CFGS; do build_one "$c" || fail=1; done
+p5_log "builds of $APP done (fail=$fail); static counts in $OUT/static-counts.csv"; exit $fail
