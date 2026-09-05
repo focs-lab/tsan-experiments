@@ -8,11 +8,17 @@ cd "$(dirname "$0")"; source ./lib.sh; source ./configs.sh
 APP=${1:?}; CFG=${2:?}; RUN=${3:?}; OUTROOT=${4:?}; CPUSET=${5:-$P5_CPUSET_DEFAULT}
 BASE=$(p5_base "$CFG"); TAG=$(p5_tag "$CFG"); APPDIR=$(p5_app_dir "$APP"); BIN=$(p5_binary "$APP" "$CFG")
 [ -x "$BIN" ] || p5_die "no binary for $APP $CFG: $BIN"
+if [ -n "${P5_HASH:-}" ]; then   # provenance gate: the binary must carry the hash this sweep is about
+  bstamp=$(grep -m1 "^compiler_head:" "$(p5_build_dir "$APP" "$CFG")/build_info.txt" 2>/dev/null | awk '{print substr($2,1,12)}')
+  [ "$bstamp" = "${P5_HASH:0:12}" ] || p5_die "STALE BINARY for $APP $CFG: build_info compiler_head=${bstamp:-none}, sweep hash=$P5_HASH (rebuild with build.sh)"
+fi
 D="$OUTROOT/$APP/$CFG/run$RUN"; mkdir -p "$D"; LOG="$D/cmd.log"
 NCPU=$(taskset -c "$CPUSET" nproc)
 export TSAN_OPTIONS="${TSAN_OPTIONS:-report_bugs=0}"
 TS() { taskset -c "$CPUSET" "$@"; }
-read -r busy0 idle0 <<< "$(p5_cpu_snapshot)"; load0=$(p5_loadavg); t0=$(date +%s.%N)
+read -r busy0 idle0 <<< "$(p5_cpu_snapshot)"; read -r in0 out0 nin nout <<< "$(python3 ./cpu_snapshot.py "$CPUSET")"
+load0=$(p5_loadavg); t0=$(date +%s.%N)
+EXTRA_TICKS=0   # CPU time of ours that /usr/bin/time cannot see (a server started outside the timed region)
 TIMEF=/usr/bin/time; OURS="$D/ours.time"
 rc=0
 case "$APP" in
@@ -25,6 +31,8 @@ case "$APP" in
     $TIMEF -f "%U %S %M" -o "$OURS" taskset -c "$CPUSET" "$APPDIR/memtier_benchmark-2.1.1/memtier_benchmark" --hide-histogram \
       -t 10 -p 7777 -x "${NTESTS:-5}" --pipeline 16 -P memcache_text --random-data > "$D/memtier.txt" 2> "$LOG"; rc=$?
     grep VmHWM /proc/$spid/status 2>/dev/null > "$D/server.rss"      # peak RSS of the server before it exits
+    # the server runs outside the timed region: add its ticks to ours, else its 48 threads look like foreign load
+    EXTRA_TICKS=$(awk '{print $14+$15+$16+$17}' /proc/$spid/stat 2>/dev/null || echo 0)
     kill -TERM "$spid" 2>/dev/null; wait "$spid" 2>/dev/null
     for i in $(seq 1 30); do (echo > /dev/tcp/127.0.0.1/7777) 2>/dev/null || break; sleep 1; done
     ;;
@@ -42,14 +50,19 @@ case "$APP" in
         $TIMEF -f "%U %S %M" -o "$OURS" taskset -c "$CPUSET" ./run-one.sh "mysql-$BASE$TAG" "$D" ) > "$LOG" 2>&1; rc=$?
     ;;
   ffmpeg)
-    ( cd "$APPDIR" && RUNS_COUNT=1 FF_BUILD_LIST="ffmpeg-$BASE$TAG" SUMMARY_CSV="$D/summary.csv" SUMMARY_JSON="$D/summary.json" \
+    # -threads goes straight to the encoder: libx265 maps it to frame threads and refuses anything above
+    # X265_MAX_FRAME_THREADS (16), so a pinned-CPU-count default of 48 makes the h265 codec fail on every
+    # build and vanish from the results.  The paper's runs used 4; keep that unless FF_THREADS says otherwise.
+    ( cd "$APPDIR" && RUNS_COUNT=1 FF_BUILD_LIST="ffmpeg-$BASE$TAG" FFMPEG_BENCH_NPROC_COUNT="${FF_THREADS:-4}" \
+        SUMMARY_CSV="$D/summary.csv" SUMMARY_JSON="$D/summary.json" \
         $TIMEF -f "%U %S %M" -o "$OURS" taskset -c "$CPUSET" ./bench_ffmpeg_all.sh ) > "$LOG" 2>&1; rc=$?
     [ -s "$D/summary.csv" ] || rc=1
     ;;
 esac
-t1=$(date +%s.%N); read -r busy1 idle1 <<< "$(p5_cpu_snapshot)"; load1=$(p5_loadavg)
+t1=$(date +%s.%N); read -r busy1 idle1 <<< "$(p5_cpu_snapshot)"; read -r in1 out1 nin nout <<< "$(python3 ./cpu_snapshot.py "$CPUSET")"
+load1=$(p5_loadavg)
 read -r ou os om <<< "$(tail -1 "$OURS" 2>/dev/null)"
-HZ=$(getconf CLK_TCK); machine_busy=$(( (busy1 - busy0) )); ours_ticks=$(python3 -c "print(int((${ou:-0}+${os:-0})*$HZ))")
+HZ=$(getconf CLK_TCK); machine_busy=$(( (busy1 - busy0) )); ours_ticks=$(python3 -c "print(int((${ou:-0}+${os:-0})*$HZ) + ${EXTRA_TICKS:-0})")
 python3 - "$D" <<PY
 import json, hashlib, os, sys, time
 d = sys.argv[1]
@@ -65,12 +78,16 @@ meta = {
   "cpuset": "$CPUSET", "ncpu": $NCPU, "mode": "${P5_MODE:-pinned}",
   "governor": "$(p5_governor)", "no_turbo": "$(p5_turbo)",
   "loadavg_before": "$load0", "loadavg_after": "$load1",
-  "machine_busy_ticks": $machine_busy, "ours_ticks": $ours_ticks, "hz": $HZ,
+  "machine_busy_ticks": $machine_busy, "ours_ticks": $ours_ticks, "extra_ticks": ${EXTRA_TICKS:-0}, "hz": $HZ,
+  "inside_busy_share": round(($in1 - $in0) / max(1.0, ($t1 - $t0) * $HZ * $nin), 4),
+  "outside_busy_share": round(($out1 - $out0) / max(1.0, ($t1 - $t0) * $HZ * $nout), 4),
+  "n_inside": $nin, "n_outside": $nout,
   "foreign_ticks": max(0, $machine_busy - $ours_ticks),
   "foreign_cpu_share": round(max(0, $machine_busy - $ours_ticks) / max(1.0, ($t1 - $t0) * $HZ * $(nproc)), 4),
   "tsan_options": "$TSAN_OPTIONS", "max_rss_kb": ${om:-0},
 }
 json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
-print(f"{meta['app']} {meta['config']} run{meta['run']} rc={meta['rc']} {meta['seconds']}s foreign_cpu_share={meta['foreign_cpu_share']}")
+print(f"{meta['app']} {meta['config']} run{meta['run']} rc={meta['rc']} {meta['seconds']}s "
+      f"outside_busy={meta['outside_busy_share']} inside_busy={meta['inside_busy_share']} foreign_cpu_share={meta['foreign_cpu_share']}")
 PY
 exit $rc

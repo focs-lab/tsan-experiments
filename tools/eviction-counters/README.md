@@ -102,3 +102,7 @@ Plain-read records *are* evicted, so "no racing plain access" would be wrong; "n
 traced run per build for SQLite (full workload) and one short traced run per build for memcached (a few seconds,
 a handful of `clock_handler` ticks); the writer's record on `current_time` also disappears through TSan's
 post-report clearing, which is not an eviction. Traces: `/extra/alexey/tsan-experiments/eviction-traces/`.
+
+## Compiler copy for these measurements (2026-09-05)
+
+From stage-b on, the eviction counters exist only in the counters-ON copy `/extra/alexey/builds/tsan-perf-d3bf9f8c39fe-evictstats/` (`COMPILER_RT_TSAN_EVICTION_STATS=ON`); the performance copy `tsan-perf-d3bf9f8c39fe` prints nothing under `print_evictions=1`. Point every P3 run at the `-evictstats` copy; it has no `opt`.

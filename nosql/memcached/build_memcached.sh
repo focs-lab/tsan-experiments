@@ -149,8 +149,15 @@ if [ -d "$BUILD_DIR_NAME" ]; then
     rm -rf "old-builds/$BUILD_DIR_NAME.$stamp"
     mv "$BUILD_DIR_NAME" "old-builds/$BUILD_DIR_NAME.$stamp"
   else
-    echo "Removing existing directory: $BUILD_DIR_NAME"
-    rm -rf "$BUILD_DIR_NAME"
+    # Same compiler stamp: a rebuild, delete. Another stamp: archive (CLAUDE.md: never overwrite another hash's build).
+    old_stamp=$(build_stamp_of "$BUILD_DIR_NAME"); cur_stamp=$(compiler_stamp_of "$TARGET_CC")
+    if [ -n "$old_stamp" ] && [ "$old_stamp" = "$cur_stamp" ]; then
+      echo "Removing previous build of the same compiler ($old_stamp): $BUILD_DIR_NAME"; rm -rf "$BUILD_DIR_NAME"
+    else
+      mkdir -p old-builds; rm -rf "old-builds/$BUILD_DIR_NAME.${old_stamp:-unknown}"
+      echo "Archiving build of another compiler $BUILD_DIR_NAME -> old-builds/$BUILD_DIR_NAME.${old_stamp:-unknown}"
+      mv "$BUILD_DIR_NAME" "old-builds/$BUILD_DIR_NAME.${old_stamp:-unknown}"
+    fi
   fi
 fi
 mkdir -p "$BUILD_DIR_NAME"

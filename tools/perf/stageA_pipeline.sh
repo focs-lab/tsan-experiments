@@ -19,5 +19,5 @@ for app in memcached sqlite redis ffmpeg mysql; do
 done
 python3 aggregate.py "$OUT" > /dev/null 2>&1
 p5_log "Stage A application benchmarks done; resuming Chromium builds"
-( cd ../../chromium && setsid nohup ./build_configs.sh "$HASH" tsan tsan-dom-ea-lo-st-swmr > build-stageA-chromium-1.log 2>&1 < /dev/null & sleep 2; setsid nohup ./build_configs.sh "$HASH" tsan-sound > build-stageA-chromium-2.log 2>&1 < /dev/null & )
+( cd ../../chromium; setsid nohup ./build_configs.sh "$HASH" tsan tsan-dom-ea-lo-st-swmr > build-stageA-chromium-1.log 2>&1 < /dev/null & sleep 2; setsid nohup ./build_configs.sh "$HASH" tsan-sound > build-stageA-chromium-2.log 2>&1 < /dev/null & )
 echo "STAGE-A-APPS DONE" >> "$OUT/pipeline.log"

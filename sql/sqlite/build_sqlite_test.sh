@@ -50,6 +50,7 @@ TARGET_CC=""
 
 # tools/tsan_compiler.sh sets TSAN_CC (honours LLVM_TSAN_ROOT, verifies LLVM_ROOT_PATH).
 source ../../tools/tsan_compiler.sh
+source ../../tools/write_build_info.sh   # (moved up: build_stamp_of/compiler_stamp_of are used by the archive rule)
 TARGET_CC="$TSAN_CC"
 
 if [[ "$CONFIG_TYPE" == "orig" ]]; then
@@ -110,6 +111,15 @@ if [ -f "$BUILD_SUBDIR/threadtest3" ] && [ ! -f "$BUILD_SUBDIR/build_info.txt" ]
     echo "Archiving paper-era build $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
     rm -rf "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
     mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+elif [ -f "$BUILD_SUBDIR/build_info.txt" ]; then
+    # A build of another compiler is archived by its stamp, never overwritten in place (CLAUDE.md); a build of
+    # the same compiler is simply rebuilt.
+    OLD_STAMP=$(build_stamp_of "$BUILD_SUBDIR"); CUR_STAMP=$(compiler_stamp_of "$TARGET_CC")
+    if [ -n "$OLD_STAMP" ] && [ "$OLD_STAMP" != "$CUR_STAMP" ]; then
+        OLD_DIR="${BUILD_ROOT:-build}/old-builds"; mkdir -p "$OLD_DIR"
+        echo "Archiving build of another compiler $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+        rm -rf "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"; mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+    fi
 fi
 mkdir -p "$BUILD_SUBDIR"
 
@@ -124,7 +134,6 @@ $TARGET_CC $FINAL_CFLAGS -DSQLITE_THREADSAFE=1 \
     -o "$BUILD_SUBDIR/threadtest3"
 
 # Record compiler/tree/flags next to the binary (picked up by tools/preservation/run_preservation.py).
-source ../../tools/write_build_info.sh
 write_build_info "$BUILD_SUBDIR" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE"
 
 echo "--- Build for $CONFIG_TYPE completed successfully ---"

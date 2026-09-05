@@ -28,7 +28,12 @@ json.dump({"app":"$APP","hash":"$HASH","N":$N,"configs":"$CFGS".split(),"cpuset"
   "no_turbo":open("/sys/devices/system/cpu/intel_pstate/no_turbo").read().strip()}, open(os.path.join(d,"session.json"),"w"), indent=1)
 PY
 for c in $CFGS; do [ -x "$(p5_binary "$APP" "$c")" ] || p5_die "missing binary for $APP $c (build first)"; done
-FMAX=${P5_FOREIGN_MAX:-0.15}
+# Rejection threshold on the busy share of the CPUs outside our pinned set. This machine carries ~0.10 of
+# other people's load at rest (a dozen agent sessions), so 0.15 rejected runs that were merely normal: MySQL
+# lost two of three native runs at 0.15-0.17 and reported N=1. 0.25 keeps those and still rejects a real
+# second workload (the interference pilot's paired arm sat at ~0.5).
+FMAX=${P5_FOREIGN_MAX:-0.25}
+export P5_HASH="$HASH"   # bench_one.sh refuses binaries built by another compiler
 bench_and_mark() {  # cfg run [suffix]
   local c=$1 run=$2 d="$OUT/$APP/$1/run$2" line
   line=$(./bench_one.sh "$APP" "$c" "$run" "$OUT" "$CPUSET" 2>&1 | tail -1); p5_log "$line"; echo "$line${3:-}" >> "$OUT/$APP/runs.log"

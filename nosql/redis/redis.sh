@@ -418,7 +418,16 @@ if [ "$COMPILE" = true ]; then
         DIR="redis-$OPTION${BUILD_TAG:-}"
         if [ -d "$DIR" ]; then
             if [ -f "$DIR/src/build_info.txt" ]; then
-                rm -rf "$DIR"
+                # Same compiler stamp: a rebuild, delete. Another stamp: archive as old-builds/<dir>.<stamp>
+                # (CLAUDE.md: builds of another hash are never overwritten). build_info.txt lives in src/.
+                OLD_STAMP=$(build_stamp_of "$DIR/src"); CUR_STAMP=$(compiler_stamp_of "$TSAN_CC")
+                if [ -n "$OLD_STAMP" ] && [ "$OLD_STAMP" = "$CUR_STAMP" ]; then
+                    rm -rf "$DIR"
+                else
+                    mkdir -p old-builds; rm -rf "old-builds/$DIR.${OLD_STAMP:-unknown}"
+                    log "Archiving build of another compiler $DIR -> old-builds/$DIR.${OLD_STAMP:-unknown}"
+                    mv "$DIR" "old-builds/$DIR.${OLD_STAMP:-unknown}"
+                fi
             else
                 # A build without build_info.txt predates this script version (paper-era
                 # binary): keep it for provenance instead of deleting it.

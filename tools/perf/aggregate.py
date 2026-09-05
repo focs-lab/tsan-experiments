@@ -10,9 +10,24 @@ plus the static instrumentation counts (static-counts.csv) and the run mode/cpus
 Outputs perf_<app>.{md,csv,json} per app and perf_summary.md in <root>.
 """
 import argparse, csv, json, math, os, random, re, statistics as st, sys
+import importlib.util
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "nosql", "redis")); sys.path.insert(0, os.path.join(ROOT, "sql", "sqlite"))
 sys.path.insert(0, os.path.join(ROOT, "projects", "ffmpeg"))
+
+# sql/sqlite and projects/ffmpeg both contain a "parse_results.py": a plain `import parse_results` picks
+# whichever directory comes first on sys.path and silently parses with the wrong application's rules (it made
+# every SQLite run fail with "Is a directory"). Load each helper from its own file instead.
+_MODCACHE = {}
+def load_module(relpath, name):
+    if name not in _MODCACHE:
+        spec = importlib.util.spec_from_file_location(name, os.path.join(ROOT, relpath))
+        mod = importlib.util.module_from_spec(spec)
+        # register before executing: @dataclass looks the defining module up in sys.modules
+        sys.modules[name] = mod
+        spec.loader.exec_module(mod)
+        _MODCACHE[name] = mod
+    return _MODCACHE[name]
 
 # ---------------------------------------------------------------- per-app parsers -> {test: value}
 def parse_memcached(d):
@@ -24,11 +39,11 @@ def parse_memcached(d):
             f = line.split(); out["ops_sec"] = float(f[1]); out["_latency_ms"] = float(f[4]); break
     return out
 def parse_redis(d):
-    import analyze_results_redis as R
+    R = load_module("nosql/redis/analyze_results_redis.py", "redis_analyze")
     data = R.parse_results(os.path.join(d, "results.txt"))
     cfgs = list(data); return dict(data[cfgs[0]]) if cfgs else {}
 def parse_sqlite(d):
-    import parse_results as S
+    S = load_module("sql/sqlite/parse_results.py", "sqlite_parse_results")
     return dict(S.parse_log_file(os.path.join(d, "threadtest3.log")))
 def parse_mysql(d):
     out = {}
@@ -39,7 +54,7 @@ def parse_mysql(d):
         if m: out[f[:-4]] = float(m.group(1))
     return out
 def parse_ffmpeg(d):
-    import ffmpeg_contention_report as F
+    F = load_module("projects/ffmpeg/ffmpeg_contention_report.py", "ffmpeg_report")
     from pathlib import Path
     recs = F.load_summary_csv(Path(os.path.join(d, "summary.csv")), 0)
     return {r.codec: r.mean_time_s for r in recs}

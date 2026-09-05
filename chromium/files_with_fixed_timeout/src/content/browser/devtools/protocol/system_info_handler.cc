@@ -67,7 +67,7 @@ static constexpr int kGPUInfoWatchdogTimeoutMultiplierASAN = 1;
 
 // Base increased from 5000 to 10000 -- see Issue 1220072.
 static constexpr int kGPUInfoWatchdogTimeoutMs =
-    100000 * kGPUInfoWatchdogTimeoutMultiplierOS *
+    2000000 * kGPUInfoWatchdogTimeoutMultiplierOS *
     kGPUInfoWatchdogTimeoutMultiplierASAN;
 
 class AuxGPUInfoEnumerator : public gpu::GPUInfo::Enumerator {

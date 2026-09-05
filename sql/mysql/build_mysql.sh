@@ -165,8 +165,23 @@ echo "Compiler: $TARGET_CC"
 echo "Final CFLAGS: $FINAL_CFLAGS"
 echo
 
-# Clean up
-if [ -d "$BUILD_DIR_NAME" ]; then
+# Clean up.  RESUME_BUILD=1 keeps an existing tree *only* when its CMake cache records exactly this
+# compiler and these flags, so an interrupted build can continue instead of recompiling from scratch
+# (MySQL's sql_yacc.cc alone costs ~3 h under -tsan-use-escape-analysis-global on 729521af8965).
+RESUMING=0
+if [ "${RESUME_BUILD:-0}" = 1 ] && [ -f "$BUILD_DIR_NAME/CMakeCache.txt" ]; then
+	cached_flags=$(sed -n 's/^CMAKE_CXX_FLAGS:[A-Z]*=//p' "$BUILD_DIR_NAME/CMakeCache.txt" | head -1)
+	# the cache spells it :STRING= when the compiler is passed on the command line, :FILEPATH= when detected
+	cached_cxx=$(sed -n 's/^CMAKE_CXX_COMPILER:[A-Z]*=//p' "$BUILD_DIR_NAME/CMakeCache.txt" | head -1)
+	if [ "$cached_flags" = "$FINAL_CFLAGS" ] && [ "$cached_cxx" = "$TARGET_CXX" ]; then
+		RESUMING=1
+		echo "Resuming the existing build in $BUILD_DIR_NAME ($(find "$BUILD_DIR_NAME" -name '*.o' | wc -l) objects, same compiler and flags)"
+	else
+		echo "RESUME_BUILD=1 but the cache does not match this configuration; rebuilding from scratch"
+		echo "  cached compiler: $cached_cxx"; echo "  wanted compiler: $TARGET_CXX"
+	fi
+fi
+if [ "$RESUMING" = 0 ] && [ -d "$BUILD_DIR_NAME" ]; then
 	echo "Removing existing build directory: $BUILD_DIR_NAME"
 	rm -rf "$BUILD_DIR_NAME"
 fi
@@ -296,7 +311,12 @@ fi
 ( cd "$BUILD_DIR_NAME" && write_build_info "$RESULT_DIR_NAME" "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE" )
 
 
-[ -d "$BUILD_DIR_NAME" ] && rm -rf "$BUILD_DIR_NAME"
+# A resumed build keeps its tree (the caller asked for incremental builds); otherwise the scratch tree goes.
+if [ "${RESUMING:-0}" = 1 ]; then
+	echo "Keeping $BUILD_DIR_NAME (RESUME_BUILD=1)"
+else
+	[ -d "$BUILD_DIR_NAME" ] && rm -rf "$BUILD_DIR_NAME"
+fi
 
 
 echo "--- Build for $CONFIG_TYPE completed successfully ---"

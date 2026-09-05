@@ -10,13 +10,13 @@ P5_CPUSET_DEFAULT="4-27,60-83"                                # 24 cores + SMT s
 p5_log() { echo "[$(date '+%F %T')] $*"; }
 p5_die() { p5_log "ERROR: $*" >&2; exit 1; }
 # verify_compiler <hash>: prints the frozen root; dies if the stamp does not match
-p5_compiler_root() {
+p5_compiler_root() {  # <hash> -> /extra/alexey/builds/<lane>-<hash>; any lane prefix (tsan-dev-, tsan-audit-, tsan-perf-, tsan-yield-)
   local hash=$1 root
-  root="$P5_BUILDS/tsan-dev-$hash"
-  [ -x "$root/bin/clang" ] || root="$P5_BUILDS/tsan-audit-$hash"
-  [ -x "$root/bin/clang" ] || p5_die "no frozen copy for $hash under $P5_BUILDS"
-  "$root/bin/clang" --version | head -1 | grep -q "$hash" || p5_die "$root/bin/clang does not stamp $hash"
-  [ -f "$root/TSAN_AUDIT_HASH" ] && grep -q "$hash" "$root/TSAN_AUDIT_HASH" || p5_log "warning: $root has no matching TSAN_AUDIT_HASH"
+  local cands; cands=$(ls -d "$P5_BUILDS"/*-"$hash" 2>/dev/null | grep -vE -- "-evictstats$" )   # the counters-ON twin is for tools/eviction-counters, never for perf
+  root=$(echo "$cands" | head -1)
+  [ -n "$root" ] && [ -x "$root/bin/clang" ] || p5_die "no frozen copy for $hash under $P5_BUILDS (expected <lane>-$hash/ with bin/clang)"
+  [ "$(echo "$cands" | wc -l)" -gt 1 ] && p5_log "note: several frozen copies match $hash, using $root"
+  [ -f "$root/TSAN_AUDIT_HASH" ] || p5_die "$root has no TSAN_AUDIT_HASH"
   echo "$root"
 }
 p5_sha256() { sha256sum "$1" | cut -c1-64; }

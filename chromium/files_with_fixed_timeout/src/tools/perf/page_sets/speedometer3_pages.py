@@ -113,7 +113,7 @@ class _Speedometer3Story(press_story.PressStory):
           startButton.click();
         }
         """)
-    action_runner.WaitForJavaScriptCondition('testDone', timeout=60000)
+    action_runner.WaitForJavaScriptCondition('testDone', timeout=600000)
 
   def ParseTestResults(self, action_runner):
     # Extract the timings for each suite

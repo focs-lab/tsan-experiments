@@ -9,9 +9,11 @@ ROOT="$P5_DIR/results/$(date +%F)-$HASH-pilot"; mkdir -p "$ROOT"
 p5_log "phase 1: memcached alone on $A (N=$N)"
 P5_OUT="$ROOT/alone" ./run.sh memcached "$HASH" "$N" --configs "tsan tsan-sound" --cpuset "$A"
 p5_log "phase 2: memcached on $A while sqlite tsan runs on $B"
-( P5_OUT="$ROOT/paired" P5_LOCK=/tmp/p5-pilot-b.lock ./run.sh sqlite "$HASH" "$N" --configs "tsan" --cpuset "$B" > "$ROOT/paired-sqlite.log" 2>&1 ) &
+# phase 2 runs two benchmarks on purpose: the second one is exactly the "foreign" CPU time the
+# disturbance rule watches for, so the rule is switched off here (P5_FOREIGN_MAX=1).
+( P5_OUT="$ROOT/paired" P5_LOCK=/tmp/p5-pilot-b.lock P5_FOREIGN_MAX=1 ./run.sh sqlite "$HASH" "$N" --configs "tsan" --cpuset "$B" > "$ROOT/paired-sqlite.log" 2>&1 ) &
 sleep 20
-P5_OUT="$ROOT/paired" P5_LOCK=/tmp/p5-pilot-a.lock ./run.sh memcached "$HASH" "$N" --configs "tsan tsan-sound" --cpuset "$A"
+P5_OUT="$ROOT/paired" P5_LOCK=/tmp/p5-pilot-a.lock P5_FOREIGN_MAX=1 ./run.sh memcached "$HASH" "$N" --configs "tsan tsan-sound" --cpuset "$A"
 wait
 python3 aggregate.py "$ROOT/alone" --app memcached > /dev/null; python3 aggregate.py "$ROOT/paired" --app memcached > /dev/null
 python3 - "$ROOT" <<'PY'

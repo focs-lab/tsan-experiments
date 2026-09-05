@@ -60,7 +60,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
   Disconnect() before disposing of the instance.
   """
 
-  def __init__(self, devtools_client, context, timeout=12000):
+  def __init__(self, devtools_client, context, timeout=120000):
     self._websocket = inspector_websocket.InspectorWebsocket()
     self._websocket.RegisterDomain(
         'Inspector', self._HandleInspectorDomainNotification)
@@ -137,10 +137,10 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
   def ClearDataForOrigin(self, url, timeout):
     self._storage.ClearDataForOrigin(url, timeout)
 
-  def EnableSharedStorageNotifications(self, timeout=6000):
+  def EnableSharedStorageNotifications(self, timeout=60000):
     self._storage.EnableSharedStorageNotifications(timeout)
 
-  def DisableSharedStorageNotifications(self, timeout=6000):
+  def DisableSharedStorageNotifications(self, timeout=60000):
     self._storage.DisableSharedStorageNotifications(timeout)
 
   @property
@@ -154,11 +154,11 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
   def shared_storage_notifications_enabled(self):
     return self._storage.shared_storage_notifications_enabled
 
-  def GetSharedStorageMetadata(self, origin, timeout=6000):
+  def GetSharedStorageMetadata(self, origin, timeout=60000):
     return self._storage.GetSharedStorageMetadata(origin=origin,
                                                   timeout=timeout)
 
-  def GetSharedStorageEntries(self, origin, timeout=6000):
+  def GetSharedStorageEntries(self, origin, timeout=60000):
     return self._storage.GetSharedStorageEntries(origin=origin,
                                                   timeout=timeout)
 
@@ -235,7 +235,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
   # Console public methods.
 
   @_HandleInspectorWebSocketExceptions
-  def GetCurrentConsoleOutputBuffer(self, timeout=1000):
+  def GetCurrentConsoleOutputBuffer(self, timeout=10000):
     return self._console.GetCurrentConsoleOutputBuffer(timeout)
 
   # Runtime public methods.
@@ -266,7 +266,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
       exceptions.DevtoolsTargetCrashException
     """
     # Use the default both when timeout=None or the option is ommited.
-    timeout = kwargs.pop('timeout', None) or 6000
+    timeout = kwargs.pop('timeout', None) or 60000
     context_id = kwargs.pop('context_id', None)
     user_gesture = kwargs.pop('user_gesture', None) or False
     statement = js_template.Render(statement, **kwargs)
@@ -300,7 +300,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
       exceptions.DevtoolsTargetCrashException
     """
     # Use the default both when timeout=None or the option is ommited.
-    timeout = kwargs.pop('timeout', None) or 6000
+    timeout = kwargs.pop('timeout', None) or 60000
     context_id = kwargs.pop('context_id', None)
     user_gesture = kwargs.pop('user_gesture', None) or False
     promise = kwargs.pop('promise', None) or False
@@ -319,7 +319,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
 
     Optional keyword args:
       timeout: The number in seconds to wait for the condition to become
-          True (default to 6000).
+          True (default to 60000).
       context_id: The id of an iframe where to execute the code; the main page
           has context_id=1, the first iframe context_id=2, etc.
       Additional keyword arguments provide values to be interpolated within
@@ -336,7 +336,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
       exceptions.DevtoolsTargetCrashException
     """
     # Use the default both when timeout=None or the option is ommited.
-    timeout = kwargs.pop('timeout', None) or 6000
+    timeout = kwargs.pop('timeout', None) or 60000
     context_id = kwargs.pop('context_id', None)
     condition = js_template.Render(condition, **kwargs)
 
@@ -382,7 +382,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
   def WaitForSharedStorageEvents(self,
                                  expected_events,
                                  mode='strict',
-                                 timeout=6000):
+                                 timeout=60000):
     """Wait for list of expected Shared Storage notifications to be received.
 
     Example:
@@ -536,7 +536,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
       prevent_fling=None, speed=None,
       gesture_source_type=None, repeat_count=None,
       repeat_delay_ms=None, interaction_marker_name=None,
-      timeout=6000):
+      timeout=60000):
     """Runs an inspector command that causes a repeatable browser driven scroll.
 
     Args:
@@ -601,7 +601,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
       key_identifier=None, dom_code=None, dom_key=None,
       windows_virtual_key_code=None, native_virtual_key_code=None,
       auto_repeat=None, is_keypad=None, is_system_key=None,
-      timeout=6000):
+      timeout=60000):
     """Dispatches a key event to the page.
 
     Args:
@@ -665,7 +665,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
     return self._runtime.RunInspectorCommand(key_command, timeout)
 
   @_HandleInspectorWebSocketExceptions
-  def EnableCast(self, presentation_url, timeout=6000):
+  def EnableCast(self, presentation_url, timeout=60000):
     """Starts observing Cast-enabled sinks.
 
     Args:
@@ -711,7 +711,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
     return self._cast_issue_message
 
   @_HandleInspectorWebSocketExceptions
-  def SetCastSinkToUse(self, sink_name, timeout=6000):
+  def SetCastSinkToUse(self, sink_name, timeout=60000):
     """Sets the sink to be used for a Cast session.
 
     Args:
@@ -729,7 +729,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
     return self._runtime.RunInspectorCommand(set_sink_command, timeout)
 
   @_HandleInspectorWebSocketExceptions
-  def StartTabMirroring(self, sink_name, timeout=6000):
+  def StartTabMirroring(self, sink_name, timeout=60000):
     """Starts a tab mirroring session.
 
     Args:
@@ -747,7 +747,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
     return self._runtime.RunInspectorCommand(start_mirroring_command, timeout)
 
   @_HandleInspectorWebSocketExceptions
-  def StopCasting(self, sink_name, timeout=6000):
+  def StopCasting(self, sink_name, timeout=60000):
     """Stops all session on a specific Cast enabled sink.
 
     Args:
@@ -766,7 +766,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
 
   @_HandleInspectorWebSocketExceptions
   def StartMobileDeviceEmulation(
-      self, width=36000, height=640, dsr=2, timeout=6000):
+      self, width=36000, height=640, dsr=2, timeout=60000):
     """Emulates a mobile device.
 
     This method is intended for benchmarks used to gather non-performance
@@ -798,7 +798,7 @@ class InspectorBackend(six.with_metaclass(trace_event.TracedMetaClass, object)):
     return self._runtime.RunInspectorCommand(emulate_command, timeout)
 
   @_HandleInspectorWebSocketExceptions
-  def StopMobileDeviceEmulation(self, timeout=6000):
+  def StopMobileDeviceEmulation(self, timeout=60000):
     """Stops emulation of a mobile device.
 
     Raises:
