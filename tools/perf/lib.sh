@@ -30,16 +30,31 @@ p5_governor() { cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev
 p5_turbo() { cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null; }
 # app -> dir of the app's scripts, binary path for a config, "kind"
 p5_app_dir() { case "$1" in memcached) echo "$P5_ROOT/nosql/memcached";; redis) echo "$P5_ROOT/nosql/redis";; sqlite) echo "$P5_ROOT/sql/sqlite";; mysql) echo "$P5_ROOT/sql/mysql";; ffmpeg) echo "$P5_ROOT/projects/ffmpeg";; *) p5_die "unknown app $1";; esac; }
-p5_binary() {  # app cfg
-  local app=$1 cfg=$2 b t; b=$(p5_base "$cfg"); t=$(p5_tag "$cfg")
+p5_binary() {  # app cfg -> binary of this configuration built by $P5_HASH (canonical dir, else old-builds/<dir>.<hash>)
+  local app=$1 cfg=$2 b t canon arch; b=$(p5_base "$cfg"); t=$(p5_tag "$cfg")
   case "$app" in
-    memcached) echo "$(p5_app_dir memcached)/memcached-$b$t/memcached";;
-    redis)     echo "$(p5_app_dir redis)/redis-polygon/redis-$(p5_redis_name "$cfg")$t/src/redis-server";;
-    sqlite)    echo "$(p5_app_dir sqlite)/build/test-$b$t/threadtest3";;
-    mysql)     echo "$(p5_app_dir mysql)/mysql-$b$t/bin/mysqld";;
-    ffmpeg)    echo "$(p5_app_dir ffmpeg)/ffmpeg-$b$t/bin/ffmpeg";;
+    memcached) canon="$(p5_app_dir memcached)/memcached-$b$t";                               arch="$(p5_app_dir memcached)/old-builds/memcached-$b$t";;
+    redis)     canon="$(p5_app_dir redis)/redis-polygon/redis-$(p5_redis_name "$cfg")$t";     arch="$(p5_app_dir redis)/redis-polygon/old-builds/redis-$(p5_redis_name "$cfg")$t";;
+    sqlite)    canon="$(p5_app_dir sqlite)/build/test-$b$t";                                 arch="$(p5_app_dir sqlite)/build/old-builds/test-$b$t";;
+    mysql)     canon="$(p5_app_dir mysql)/mysql-$b$t";                                       arch="$P5_INSTALL_ROOT/mysql/old-builds/mysql-$b$t";;
+    ffmpeg)    canon="$(p5_app_dir ffmpeg)/ffmpeg-$b$t";                                     arch="$P5_INSTALL_ROOT/ffmpeg/old-builds/ffmpeg-$b$t";;
+  esac
+  local dir="$canon"
+  # Several compilers' builds coexist: the canonical directory holds the most recent build, earlier ones are
+  # archived as <dir>.<stamp> (every build script does that since 2026-09-05). When the sweep names a hash,
+  # take whichever holds that stamp; the runner's gate re-checks the stamp of what we return.
+  if [ -n "${P5_HASH:-}" ]; then
+    local want=${P5_HASH:0:12} have
+    have=$(p5_dir_stamp "$app" "$canon")
+    if [ "$have" != "$want" ] && [ -d "$arch.$want" ]; then dir="$arch.$want"; fi
+  fi
+  case "$app" in
+    memcached) echo "$dir/memcached";; redis) echo "$dir/src/redis-server";; sqlite) echo "$dir/threadtest3";;
+    mysql) echo "$dir/bin/mysqld";; ffmpeg) echo "$dir/bin/ffmpeg";;
   esac
 }
+# compiler stamp recorded in a build directory (redis keeps build_info.txt in src/)
+p5_dir_stamp() { local app=$1 dir=$2 f="$dir/build_info.txt"; [ "$app" = redis ] && f="$dir/src/build_info.txt"; grep -m1 "^compiler_head:" "$f" 2>/dev/null | awk '{print substr($2,1,12)}'; }
 # directory holding build_info.txt for a config (redis writes it in src/, next to the binary)
 p5_build_dir() { local bin; bin=$(p5_binary "$1" "$2"); case "$1" in mysql|ffmpeg) dirname "$(dirname "$bin")";; *) dirname "$bin";; esac; }
 

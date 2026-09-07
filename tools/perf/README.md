@@ -224,6 +224,10 @@ Chromium row waits for it. No benchmark has run on this copy yet.
    empirical, memcached and MySQL get a **thread-policy pilot** first (stock and sound only, N = 3, the
    paper-era count 112 / 84 against the pinned 48 / 36); if the paper-era count yields materially larger
    speedups, Stage B adopts it for that application and says so.
+   **Pilot result (2026-09-07, d3bf9f8c39fe, N = 3):** the policy does not matter — memcached sound/stock 1.008
+   (pinned, `-t 48`) vs 1.004 (paper, `-t 112`), MySQL 1.014 vs 1.014 (36 vs 84 sysbench threads). **Stage B
+   runs the pinned rule.** Side finding: with the eviction counters off, memcached's run-to-run CV is 3.6-3.8 %
+   (10-12 % on 729521af8965) and stock throughput 2.1 M ops/s (0.36 M): the bimodality was the runtime tax.
 2. **memcached** runs N = 10 (a run is ~100 s) at the paper-derived setting, unchanged client/server sharing,
    so the workload stays the paper's and the ±10 % run-to-run spread is averaged rather than redesigned.
 3. **FFmpeg** keeps the paper's four codecs in the run; the headline geometric mean **excludes**
@@ -232,7 +236,11 @@ Chromium row waits for it. No benchmark has run on this copy yet.
    compiler lane supplies a safe name list, `-tsan-thread-free-names` rows; the plain sound rows use neither.
 5. **Yield copy** `tsan-yield-fdf7a4dd41e9` is in scope: the main rows (tsan, sound, AllOpt±peel, DynSTC) on
    all five applications at N = 5, compared with the stage-b copy; per-switch A/B only where a total moves.
-6. Other Stage A settings stand: 48 pinned CPUs, one benchmark at a time, run-major, disturbance judged on
+6. **Memory caps** (machine rule after the 5-6 Sep outage; `user.slice` has a shared MemoryHigh of 110 GiB for
+   every account, no swap): every build runs in a `systemd-run --user --scope -p MemoryMax=` scope (MySQL 48G,
+   FFmpeg 24G, others 8G; MySQL launched alone) and every measurement in a 32G scope — sized from observed peaks
+   (≤ 1.8 GB timed tree, 6.6 GB per Chromium renderer), binding below the shared limit, never `bench`.
+7. Other Stage A settings stand: 48 pinned CPUs, one benchmark at a time, run-major, disturbance judged on
    the outside CPUs (threshold 0.25), provenance gate on every binary, N = 5 elsewhere, MySQL sysbench 180 s.
 
 <!-- P5-TABLES-START -->

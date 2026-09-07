@@ -20,12 +20,19 @@ read -r busy0 idle0 <<< "$(p5_cpu_snapshot)"; read -r in0 out0 nin nout <<< "$(p
 load0=$(p5_loadavg); t0=$(date +%s.%N)
 EXTRA_TICKS=0   # CPU time of ours that /usr/bin/time cannot see (a server started outside the timed region)
 TIMEF=/usr/bin/time; OURS="$D/ours.time"
+# Every measurement runs in its own memory-capped user scope (machine rule of 2026-09-07; user.slice has a
+# shared 110 GiB MemoryHigh and no swap, so an uncapped runaway would stall every session silently). 32G is
+# > 10x any observed peak (timed tree <= 1.8 GB, Chromium renderer 6.6 GB); a cap that fires makes the run
+# rc != 0 -> re-run, which is attributable. Never `bench`. P5_MEAS_MEM overrides.
+if command -v systemd-run >/dev/null && systemd-run --user --scope --quiet -p MemoryMax=1M -- true 2>/dev/null; then
+  TIMEF="systemd-run --user --scope --quiet -p MemoryMax=${P5_MEAS_MEM:-32G} -- /usr/bin/time"
+fi
 rc=0
 case "$APP" in
   memcached)
     # paper workload: server -c 4096 -t <cpus> -p 7777; memtier -t 10 -x 5 --pipeline 16 -P memcache_text --random-data
     (echo > /dev/tcp/127.0.0.1/7777) 2>/dev/null && p5_die "port 7777 busy"
-    taskset -c "$CPUSET" "$BIN" -c 4096 -t "$NCPU" -p 7777 -U 0 > "$D/server.out" 2>&1 &
+    ${TIMEF%/usr/bin/time} taskset -c "$CPUSET" "$BIN" -c 4096 -t "${MC_THREADS:-$NCPU}" -p 7777 -U 0 > "$D/server.out" 2>&1 &   # MC_THREADS: thread-policy pilot
     spid=$!
     for i in $(seq 1 60); do (echo > /dev/tcp/127.0.0.1/7777) 2>/dev/null && break; sleep 1; done; sleep 1
     $TIMEF -f "%U %S %M" -o "$OURS" taskset -c "$CPUSET" "$APPDIR/memtier_benchmark-2.1.1/memtier_benchmark" --hide-histogram \
@@ -46,7 +53,7 @@ case "$APP" in
     grep "^$BASE$TAG	" "$APPDIR/results/memory.txt" 2>/dev/null | tail -1 > "$D/memory.txt"
     ;;
   mysql)
-    ( cd "$APPDIR/benchmysql" && SYSBENCH_RUN_SECONDS="${MYSQL_SECONDS:-180}" SYSBENCH_RUN_THREADS=$((NCPU * 3 / 4)) \
+    ( cd "$APPDIR/benchmysql" && SYSBENCH_RUN_SECONDS="${MYSQL_SECONDS:-180}" SYSBENCH_RUN_THREADS="${MYSQL_THREADS:-$((NCPU * 3 / 4))}" \
         $TIMEF -f "%U %S %M" -o "$OURS" taskset -c "$CPUSET" ./run-one.sh "mysql-$BASE$TAG" "$D" ) > "$LOG" 2>&1; rc=$?
     ;;
   ffmpeg)
@@ -85,6 +92,7 @@ meta = {
   "foreign_ticks": max(0, $machine_busy - $ours_ticks),
   "foreign_cpu_share": round(max(0, $machine_busy - $ours_ticks) / max(1.0, ($t1 - $t0) * $HZ * $(nproc)), 4),
   "tsan_options": "$TSAN_OPTIONS", "max_rss_kb": ${om:-0},
+  "threads_setting": "${MC_THREADS:-}${MYSQL_THREADS:-}${FF_THREADS:-}",
 }
 json.dump(meta, open(os.path.join(d, "meta.json"), "w"), indent=1)
 print(f"{meta['app']} {meta['config']} run{meta['run']} rc={meta['rc']} {meta['seconds']}s "

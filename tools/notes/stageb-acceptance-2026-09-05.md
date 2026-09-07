@@ -70,3 +70,81 @@ item for Alexey:** trust a `linkonce_odr` body's summary under the one-definitio
 argument" is a semantic property shared by every copy). Per-function list: `/tmp/claude-1005/mysql-delta.txt`;
 binaries `installs/mysql-tsan-sound` (parent) and `installs/mysql/mysql-tsan-sound` (stage-b).
 
+## Two more facts from the tsan-dev lane (2026-09-05, while deriving the thread-free lists)
+
+- **glibc 2.38+ renames the C23-affected conversions:** on this machine the IR calls `__isoc23_strtol`,
+  `__isoc23_strtoul`, `__isoc23_strtoll`, `__isoc23_strtoull`, `__isoc23_sscanf`, names neither
+  TargetLibraryInfo nor the built-in thread-free list knows (also uncovered: `getsubopt`, `__getdelim`,
+  `preadv`). Each is a bodiless callee: it ends the single-threaded prefix (memcached: 22 call sites, the first
+  early in option parsing, so STC's prefix ends before libevent) and, for the escape analysis, its arguments
+  escape. The `tsan-sound-tfn` rows vouch them explicitly (sound); the proper fix (aliases on the built-in list,
+  EA treating them as their base functions) lands in the second stage-b copy.
+- **Lost-race shape 22** (a pointer to a local stored through a library call's out-parameter — `strtol`'s end
+  pointer — and then published) reproduces on 729521af8965 and d3bf9f8c39fe; fixed in the second copy. It can
+  only add instrumentation, so **every sound row on d3bf9f8c39fe is a lower bound of the sound count by a small
+  amount.**
+
+## `-tsan-thread-free-names` rows (Stage B lever, from tsan-dev's lists)
+
+Syntax `-mllvm -tsan-thread-free-names=a,b,c` (exact symbol names; built-in creators cannot be overridden;
+feeds STC's `isKnownThreadFree` for bodiless callees, per unit and whole-program; LO/SWMR inherit STC's
+verdicts; on the yield copy DynSTC's run-ending rule uses the same predicate). Sound rule: vouch only
+functions outside the linked IR that neither start a thread nor take a callback. Rows: memcached
+`tsan-sound-tfn` (libevent's `event_get_version, event_config_new, event_config_set_flag,
+event_base_new_with_config, event_config_free` + the glibc aliases) and `tsan-sound-tfn-wp`; Redis `sound-tfn`
+(`sd_notify` + the aliases). None for SQLite, FFmpeg, MySQL (x264/x265/OpenSSL init are exactly what must not
+be vouched unread). Correction from tsan-dev the same hour: the `__isoc23_*`/`__isoc99_*` families are already
+thread-free for STC through a built-in prefix rule, so only `getsubopt`, `__getdelim`, `preadv` genuinely cut a
+prefix (`getsubopt` is in memcached's option parsing); the aliases stay in the list as harmless redundancy and
+still cost escape-analysis precision (unknown to the retention table) — a yield item for the next copies.
+
+Static counts on d3bf9f8c39fe (memory-access sites): memcached sound 6 643 → sound-tfn **6 590** (−53) →
+sound-tfn-wp **6 227** (−416 vs sound; the lowest memcached count of any sound row, below Stage A's AllOpt-peel
+6 367). Redis sound 37 608 → sound-tfn 37 608 (0: nothing per unit) → sound-tfn-wp 35 372 (−2 236 vs sound;
+plain sound-wp is **35 372 as well**, so on Redis the list adds exactly nothing beyond the summaries —
+its runtime rows are dropped from the sweep as duplicates of sound / sound-wp). memcached plain sound-wp is
+6 280, so there the list adds −53 on top of the summaries (6 227): both memcached lever rows stay.
+
+## Yield copy tsan-yield-fdf7a4dd41e9 vs stage-b d3bf9f8c39fe (static, main rows; builds in progress)
+
+memcached: tsan 6748 = 6748; sound 6643 → 6640 (−3), AllOpt-peel 6408 → 6405 (−3), AllOpt+peel 7130 → 7127 (−3),
+sound-wp 6280 → 6269 (−11), DynSTC (tsan-stmt) 6810 = 6810 — exactly the announced C5 effect (memcached −3 under
+EA/sound; C1 shows only in NumThreadCountLoads). Other applications follow as their builds land.
+redis: tsan 37941 → 37941 (+0); sound 37608 → 37605 (-3); AllOpt-peel 37077 → 37042 (-35); AllOpt+peel 43292 → 43243 (-49); sound-wp 35372 → 35328 (-44); DynSTC 37882 → 37878 (-4)
+sqlite: tsan 57996 → 57996 (+0); sound 57025 → 57006 (-19); AllOpt-peel 56087 → 56064 (-23); AllOpt+peel 61931 → 61872 (-59); sound-wp 56890 → 56698 (-192); DynSTC 57957 → 57961 (+4)
+ffmpeg: tsan 514609 → 514609 (+0); sound 497410 → 497310 (-100); AllOpt-peel 474557 → 473446 (-1111); AllOpt+peel 542684 → 541450 (-1234); DynSTC 514493 → 514540 (+47)
+The DynSTC (`tsan-stmt`) rows moved by +47 (FFmpeg) and +4 (SQLite) in the binary count; attributed by
+tsan-dev to **back-end code duplication, not instrumentation**: the IR after the pass has identical
+`__tsan_read/write` calls with both copies (sqlite3.c: 56 196, identical per function over 1 431 functions),
+while the object count moves both ways per function (tail duplication / branch folding around C1's relocated
+guard; the guard's thread-count load is a plain load, never a `__tsan_` call). So the objdump count carries
+±0.01 % codegen noise on DynSTC rows; a duplication-free static count must be taken on the IR. DynSTC rows are
+recorded as "unchanged instrumentation, ±codegen". MySQL's yield rows pending.
+
+## Parser compile-time fix landed on the stage-b line (tsan-dev, 2026-09-05 evening)
+
+perf/ea-join-sharing 35e03631a20a, cherry-picked onto stage-b as 2dcc82078a60: the `MYSQLparse` extract through
+`opt` goes 1 379 s → **12.7 s** (flow-sensitive), 1 176 s → 13.4 s (flow-insensitive), 2.8 → 1.8 GB;
+sqlite3.c 7.9 → 5.1 s. Identity: a verify mode recomputing every join and transfer from scratch found no
+difference over the suites, the 28-module corpus and all 47 349 pops of the extract; static counts identical on
+all 112 corpus rows; the whole-program print of `redis-server.ll` identical. Expect `sql_yacc.cc` at roughly the
+no-EA time plus seconds on the second copy (hash2 = stage-b with shape 22 + this + the Chromium pointee-views
+fix, built in the first announced gap). Methodological note from the same message: the printed-state *digests*
+are stable only when both binaries run at the same time (the printer's block order varies between runs), so the
+identity proofs that count are the assertion verifiers and the static counts.
+The Chromium fix followed the same evening (perf/ea-pointee-views 9e678cc6ae3e): the `vk_safe_struct_utils`
+extract goes from "not finished in 3 600 s" to 50 s in both EA modes, verdict-identical on every gate; memory
+on that unit is still high (18 GB, every block holding the full points-to clique), which the parser fix's
+shared-base states should shrink — the two are being merged as perf/stage-b2 with the full gate set, and
+hash2 is that merge. Expected on hash2: `sql_yacc.cc` ≈ no-EA time + ~15 s; Chromium EA rows compile normally.
+mysql: tsan 602434 = 602434; sound 597140 → 596943 (−197); AllOpt-peel 574085 → 573765 (−320); AllOpt+peel 640355 → 639937 (−418); DynSTC 602809 → 602814 (+5, codegen). **Yield copy accepted on all five applications: stock identical, every EA/DE row non-positive, DynSTC ±codegen.** (Builds finished 2026-09-05 17:56; recorded 2026-09-07 after a session loss.)
+
+## Two compilers' builds coexist: resolution by hash (2026-09-07)
+
+Building the yield copy's rows put fdf7a4dd41e9 binaries into every canonical build directory and archived the
+d3bf9f8c39fe ones as `old-builds/<dir>.d3bf9f8c39fe` (the archive rule added on 09-05). The runner's
+provenance gate refused the first Stage B pilot for exactly that reason ("STALE BINARY … compiler_head
+fdf7a4dd41e9, sweep hash d3bf9f8c39fe"), which is the gate working. `p5_binary` now resolves by the sweep's
+hash: the canonical directory when its stamp matches, else `old-builds/<dir>.<hash>`; verified for all five
+applications on both hashes. Nothing was moved.
+

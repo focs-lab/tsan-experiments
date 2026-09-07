@@ -7,7 +7,10 @@
 set -uo pipefail
 cd "$(dirname "$0")"; source ./lib.sh; source ./configs.sh
 APP=${1:?app}; HASH=${2:?hash}; shift 2
-CFGS="${*:-$(p5_configs_for "$APP" "$P5_STAGE_A")}"
+# An explicit list is filtered through p5_configs_for too: a -wp/-tfn row handed to an application without a
+# generator (FFmpeg, MySQL) made gen_summaries fail and build.sh exit without its completion marker (2026-09-05).
+CFGS=$(p5_configs_for "$APP" "${*:-$P5_STAGE_A}")
+[ "$(echo "${*:-}" | wc -w)" -eq "$(echo "$CFGS" | wc -w)" ] || p5_log "note: dropped rows not applicable to $APP from '${*:-}'"
 ROOT=$(p5_compiler_root "$HASH") || exit 1
 OUT="${P5_OUT:-$P5_DIR/results/$(date +%F)-$HASH}"; mkdir -p "$OUT/build"
 export LLVM_TSAN_ROOT="$ROOT" BUILD_SCRATCH="$P5_SCRATCH"
@@ -16,6 +19,19 @@ APPDIR=$(p5_app_dir "$APP")
 jobs_var="NPROC_$(echo "$APP" | tr a-z A-Z)"; JOBS="${!jobs_var:-}"
 case "$APP" in mysql) JOBS=${JOBS:-56};; ffmpeg) JOBS=${JOBS:-32};; *) JOBS=${JOBS:-8};; esac
 NICE="nice -n 10 ionice -c2 -n7"
+# Every build runs in its own memory-capped user scope (machine rule agreed 2026-09-07 after the 5 Sep outage:
+# heavy non-container work gets an explicit MemoryMax so a runaway fails fast instead of stalling the host; it
+# lands in user.slice/…/app.slice, needs no sudo and touches nobody's CPU mask — unlike `bench`, which confines
+# every session to 8 CPUs). Measurements are NOT capped: TSan shadow memory can reach tens of GB and a cap
+# would abort a run mid-measurement; they are pinned and record the outside-CPU busy share instead.
+build_scope() {  # <app> -> systemd-run prefix with a per-application cap, or nothing if systemd-run is unusable
+  # Caps must bind below user.slice's shared MemoryHigh (110 GiB for every account together, no swap; crossing
+# it stalls every session — diag, 2026-09-07): MySQL 48G (56 jobs; the largest single compile is 3.4 GB),
+# FFmpeg 24G, others 8G, and MySQL is launched on its own, so the concurrent total stays well under the
+# 50 GiB budget agreed with tsan-dev.
+  local cap; case "$1" in mysql) cap=${P5_BUILD_MEM_MYSQL:-48G};; ffmpeg) cap=${P5_BUILD_MEM_FFMPEG:-24G};; *) cap=${P5_BUILD_MEM:-8G};; esac
+  command -v systemd-run >/dev/null && systemd-run --user --scope --quiet -p MemoryMax=1M -- true 2>/dev/null && echo "systemd-run --user --scope --quiet -p MemoryMax=$cap --"
+}
 wait_no_foreign_bench() { while p5_bench_active; do p5_log "a bench-* unit is active (we would be on 8 CPUs); waiting 5 min"; sleep 300; done; }
 summaries_dir() { echo "$APPDIR/summaries-$HASH"; }
 ensure_summaries() {
@@ -35,11 +51,11 @@ build_one() {  # cfg
   p5_log "build $APP $cfg (jobs $JOBS) -> $log"
   local t0=$SECONDS
   case "$APP" in
-    memcached) ( cd "$APPDIR" && env "${env[@]}" $NICE ./build_memcached.sh "$base" ) > "$log" 2>&1; rc=$?;;
-    redis)     ( cd "$APPDIR" && env "${env[@]}" BUILD_OPTIONS="$(p5_redis_name "$cfg")" $NICE taskset -c 4-$((3+JOBS)) ./redis.sh --compile-only ) > "$log" 2>&1; rc=$?;;
-    sqlite)    ( cd "$APPDIR" && env "${env[@]}" $NICE ./build_sqlite_test.sh "$base" ) > "$log" 2>&1; rc=$?;;
-    mysql)     ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/mysql" $NICE ./build_mysql.sh "$base" ) > "$log" 2>&1; rc=$?;;
-    ffmpeg)    ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/ffmpeg" $NICE ./build_ffmpeg.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    memcached) ( cd "$APPDIR" && env "${env[@]}" $(build_scope memcached) $NICE ./build_memcached.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    redis)     ( cd "$APPDIR" && env "${env[@]}" BUILD_OPTIONS="$(p5_redis_name "$cfg")" $(build_scope redis) $NICE taskset -c 4-$((3+JOBS)) ./redis.sh --compile-only ) > "$log" 2>&1; rc=$?;;
+    sqlite)    ( cd "$APPDIR" && env "${env[@]}" $(build_scope sqlite) $NICE ./build_sqlite_test.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    mysql)     ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/mysql" $(build_scope mysql) $NICE ./build_mysql.sh "$base" ) > "$log" 2>&1; rc=$?;;
+    ffmpeg)    ( cd "$APPDIR" && env "${env[@]}" INSTALL_ROOT="$P5_INSTALL_ROOT/ffmpeg" $(build_scope ffmpeg) $NICE ./build_ffmpeg.sh "$base" ) > "$log" 2>&1; rc=$?;;
   esac
   local dt=$((SECONDS - t0))
   [ $rc = 0 ] && [ -x "$bin" ] || { p5_log "BUILD FAILED $APP $cfg rc=$rc (${dt}s) see $log"; echo "$APP,$cfg,FAILED,$rc,$dt" >> "$OUT/build/builds.csv"; return 1; }
@@ -54,6 +70,10 @@ build_one() {  # cfg
 # builds of different apps run concurrently (shared lock); a benchmark holds the lock exclusively, so no
 # build starts while one of our benchmarks runs and no benchmark starts while a build runs
 exec 9>"$P5_LOCK"; flock -s 9
+# Memory budget (agreed 2026-09-07): a MySQL build (48G cap) never overlaps another build of this lane, so the
+# lane's concurrent build ceiling is 48G, and the joint ceiling with tsan-dev's 40G is 88G under user.slice's
+# shared 110G high watermark. Enforced, not promised: MySQL takes this lock exclusively, every other build shares it.
+exec 8>"${P5_BUILD_MEMLOCK:-/tmp/p5-build-memory.lock}"; if [ "$APP" = mysql ]; then flock -x 8; else flock -s 8; fi
 [ -f "$OUT/static-counts.csv" ] || echo "app,config,hash,memory_access_sites,tsan_calls_total,sha256,build_seconds" > "$OUT/static-counts.csv"
 fail=0; for c in $CFGS; do build_one "$c" || fail=1; done
 p5_log "builds of $APP done (fail=$fail); static counts in $OUT/static-counts.csv"; exit $fail
