@@ -23,3 +23,14 @@ CONFIG_DETAILS["tsan-sound"]="-mllvm -tsan-use-escape-analysis-global \
                               -mllvm -tsan-use-lock-ownership \
                               -mllvm -tsan-use-single-threaded \
                               -mllvm -tsan-use-swmr"
+
+# tsan-yoff: turn the yield copy's seven changes off inside the same compiler
+# (/extra/alexey/builds/tsan-yield-d98873cda906, where all six switches default to on). A "-yoff" row is the
+# A/B partner of the same configuration without the suffix: same compiler, same binary layout, only the yield
+# changes differ, so the pair isolates them from the stage-b2 changes underneath.
+CONFIG_DETAILS["tsan-yoff"]="-mllvm -tsan-dynstc-runs-across-thread-free-calls=false \
+                             -mllvm -tsan-de-atomics-by-ordering=false \
+                             -mllvm -tsan-de-cover-containment=false \
+                             -mllvm -tsan-swmr-readonly-call-args=false \
+                             -mllvm -tsan-ea-later-escape-uses-summaries=false \
+                             -mllvm -tsan-intercepted-call-table=false"

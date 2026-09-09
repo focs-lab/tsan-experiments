@@ -70,10 +70,16 @@ build_one() {  # cfg
 # builds of different apps run concurrently (shared lock); a benchmark holds the lock exclusively, so no
 # build starts while one of our benchmarks runs and no benchmark starts while a build runs
 exec 9>"$P5_LOCK"; flock -s 9
-# Memory budget (agreed 2026-09-07): a MySQL build (48G cap) never overlaps another build of this lane, so the
-# lane's concurrent build ceiling is 48G, and the joint ceiling with tsan-dev's 40G is 88G under user.slice's
-# shared 110G high watermark. Enforced, not promised: MySQL takes this lock exclusively, every other build shares it.
-exec 8>"${P5_BUILD_MEMLOCK:-/tmp/p5-build-memory.lock}"; if [ "$APP" = mysql ]; then flock -x 8; else flock -s 8; fi
+# Machine-wide job lock (rule agreed across lanes, 2026-09-07, revised the same afternoon): /home/alexey/bin/logs/machine-memory.lock
+# (the name is historical; never recreate the file). EXCLUSIVE for any job that (a) is capped >= 20 GiB, or
+# (b) runs >= 8 sustained cores, or (c) is a timing measurement; shared or unlocked otherwise. Every build of
+# this lane is (b) (jobs 8..56), so all builds are exclusive; measurements (bench_one.sh) are (c), per run.
+# A sidecar machine-memory.lock.holder names the holder so a waiter can see what it is queueing behind.
+# the agreed canonical path (not /tmp, which tmpfiles.d empties at boot)
+MEMLOCK="${MACHINE_MEMLOCK:-/home/alexey/bin/logs/machine-memory.lock}"; [ -e "$MEMLOCK" ] || { : > "$MEMLOCK"; chmod 666 "$MEMLOCK" 2>/dev/null; }
+exec 8>"$MEMLOCK"; p5_log "waiting for the machine job lock (exclusive: build $APP, jobs $JOBS)"; flock -x 8
+printf 'lane=tsan-exp\npid=%s\nmode=exclusive\nreason=build %s (%s), jobs %s >= 8 cores\nstart=%s\nexpected_minutes=%s\ncpus=%s\nwhy=P5 build\n' "$$" "$APP" "$HASH" "$JOBS" "$(date -Iseconds)" "$([ "$APP" = mysql ] && echo 120 || echo 20)" "4-$((3+JOBS))" > "$MEMLOCK.holder" 2>/dev/null; chmod 666 "$MEMLOCK.holder" 2>/dev/null
+trap 'rm -f "$MEMLOCK.holder" 2>/dev/null' EXIT
 [ -f "$OUT/static-counts.csv" ] || echo "app,config,hash,memory_access_sites,tsan_calls_total,sha256,build_seconds" > "$OUT/static-counts.csv"
 fail=0; for c in $CFGS; do build_one "$c" || fail=1; done
 p5_log "builds of $APP done (fail=$fail); static counts in $OUT/static-counts.csv"; exit $fail

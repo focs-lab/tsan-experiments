@@ -56,3 +56,35 @@ costs three register saves on every `__tsan_read/write`. Confirmed here: `TSAN_O
 `checkpoint_starvation_1` reports 3.0e8 evictions in 10 s on the 729521af8965 binary. Consequence: SU rows on
 729521af8965 stand (both sides share the runtime); SD rows are inflated and are not to be quoted as absolutes.
 The fix (counters behind a build option, off by default) lands on the performance branch Stage B will use.
+
+## Addendum 2026-09-08: how far outside `stress1`'s natural spread the March baseline sits
+
+Stage B on `tsan-perf-d3bf9f8c39fe` (counters OFF) gives 65 instrumented `stress1` runs, five each across
+thirteen configurations, all on the pinned set. The subtest's own run-to-run envelope:
+
+| | iterations |
+|---|---|
+| min | 81 553 |
+| p25 | 100 197 |
+| median | 107 239 |
+| p75 | 123 602 |
+| max | 187 109 |
+
+So `stress1` spans **2.29x from min to max** with a CV of about 16 % inside the bulk, and it is not bimodal:
+the largest gap in the sorted values separates only three points at the top, and the rest is a continuum. The
+same shape holds for `dynamic_triggers` (2.05x, CV 16 %); every other subtest sits at 0-4 %.
+
+That sets a scale for section 3. The March stock-TSan `stress1` run did 6 417 iterations where the same
+compiler does 106 704 today, a factor of 16.6. The natural envelope of this subtest, measured over 65 runs, is
+2.29x end to end. **The March baseline is therefore about seven times further from today's median than the
+subtest's entire observed range**, so run-to-run variance does not explain it and no number of repetitions
+would have produced it. Whatever happened to that run was not sampling noise.
+
+This is also why the Stage B tables report a second geometric mean over the subtests whose **pooled** CV, taken
+across every configuration rather than off the baseline's five runs, is at most 5 %. For SQLite that excludes
+`stress1` (19.9 %), `dynamic_triggers` (16.1 %) and `stress2` (5.5 %), leaving four of seven. Pooling matters
+here: read off the baseline alone, `stress1` measures 6.4 % and its exclusion turns on where a threshold
+happens to fall; pooled over 65 runs it measures 19.9 % and the separation is unambiguous. The all-subtest column stays the headline
+because it is the only one comparable with the paper's definition; the restricted column is what the data can
+actually resolve, and it is the one that made SQLite's DynSTC row conclusive
+(`tools/notes/dynstc-sign-flip-2026-09-08.md`).

@@ -36,7 +36,13 @@ FMAX=${P5_FOREIGN_MAX:-0.25}
 export P5_HASH="$HASH"   # bench_one.sh refuses binaries built by another compiler
 bench_and_mark() {  # cfg run [suffix]
   local c=$1 run=$2 d="$OUT/$APP/$1/run$2" line
-  line=$(./bench_one.sh "$APP" "$c" "$run" "$OUT" "$CPUSET" 2>&1 | tail -1); p5_log "$line"; echo "$line${3:-}" >> "$OUT/$APP/runs.log"
+  # Common machine lock (rule of 2026-09-07): a timing measurement holds /home/alexey/bin/logs/machine-memory.lock
+  # exclusively per run; the wrapper writes the sidecar, runs the measurement in a 32G scope pinned to the
+  # bench set, and reports memory.peak. Expected minutes per application are the observed run lengths.
+  mins=$(case "$APP" in mysql) echo 15;; ffmpeg) echo 8;; sqlite) echo 6;; *) echo 3;; esac)
+  line=$(/home/alexey/bin/machine-lock --lane tsan-exp --measure --mem "${P5_MEAS_MEM:-32G}" --minutes "$mins" --cpus bench \
+           --why "$APP $c run$run ($HASH)" -- ./bench_one.sh "$APP" "$c" "$run" "$OUT" "$CPUSET" 2>&1 | grep -v '^machine-lock:' | tail -1)
+  p5_log "$line"; echo "$line${3:-}" >> "$OUT/$APP/runs.log"
   [ -f "$d/meta.json" ] || { mkdir -p "$d"; printf '{"app":"%s","config":"%s","run":%s,"rc":1,"foreign_cpu_share":0,"error":"%s"}\n' "$APP" "$c" "$run" "${line//\"/}" > "$d/meta.json"; }
   python3 ./meta_tool.py mark "$d/meta.json" "$FMAX"
 }

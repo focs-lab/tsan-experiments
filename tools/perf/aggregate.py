@@ -9,7 +9,7 @@ parser (imported from the repo where it is importable), and reports per configur
 plus the static instrumentation counts (static-counts.csv) and the run mode/cpuset from session.json.
 Outputs perf_<app>.{md,csv,json} per app and perf_summary.md in <root>.
 """
-import argparse, csv, json, math, os, random, re, statistics as st, sys
+import argparse, csv, glob, json, math, os, random, re, statistics as st, sys
 import importlib.util
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 sys.path.insert(0, os.path.join(ROOT, "nosql", "redis")); sys.path.insert(0, os.path.join(ROOT, "sql", "sqlite"))
@@ -69,9 +69,31 @@ def mean_sd(xs):
     return (st.mean(xs), st.stdev(xs) if len(xs) > 1 else 0.0)
 def ratio(num, den, hib):  # speed ratio "cfg vs base": >1 = cfg faster
     return (num / den) if hib else (den / num)
-def bootstrap_geomean_ratio(cfg_runs, base_runs, hib, B=2000, seed=1):
+def cv(xs):
+    m = st.mean(xs) if xs else 0
+    return (st.stdev(xs) / m) if (len(xs) > 1 and m) else 0.0
+def pooled_cv(per_cfg, t):
+    """A subtest's run-to-run noise, pooled over every configuration instead of read off the baseline's five
+    runs. Five values estimate a CV badly: SQLite's stress1 reads 6.4 % from the baseline alone and 16 % over
+    the 65 runs of all configurations, so a fixed threshold applied to the baseline figure includes or excludes
+    it almost by luck. Pooling is the RMS of the per-configuration CVs, which is the within-group noise the
+    ratio actually has to see through, and it does not depend on which configuration happens to be the base."""
+    cvs = [cv(i["runs"][t]) for i in per_cfg.values() if len(i["runs"].get(t, [])) >= 3]
+    if len(cvs) < 3: return None
+    return math.sqrt(sum(c * c for c in cvs) / len(cvs))
+def stable_tests(per_cfg, tests, max_cv=0.05):
+    """The subtests a run-to-run comparison can actually resolve. The set is derived from the pooled noise of
+    each subtest, so it is a property of the workload rather than of any configuration, and it is then applied
+    to every configuration alike. Returns None when fewer than half the subtests survive: at that point the
+    restricted mean is not a cleaner estimate of the same quantity, it is a different quantity. MySQL is the
+    case in point, where three of five sysbench scripts would go and the surviving pair moves the centre
+    without narrowing the interval."""
+    keep = [t for t in tests if (pooled_cv(per_cfg, t) or 0) <= max_cv]
+    return keep if (len(keep) >= 2 and len(keep) * 2 >= len(tests) and len(keep) < len(tests)) else None
+def bootstrap_geomean_ratio(cfg_runs, base_runs, hib, B=2000, seed=1, only=None):
     """cfg_runs/base_runs: {test: [values over runs]}. Resample runs per test independently."""
     rnd = random.Random(seed); tests = [t for t in cfg_runs if t in base_runs and not t.startswith("_")]
+    if only is not None: tests = [t for t in tests if t in only]
     if not tests: return (float("nan"), float("nan"))
     vals = []
     for _ in range(B):
@@ -111,6 +133,32 @@ def static_counts(root):
 
 def report_app(root, app, per_cfg, hib, statics, out_rows):
     lines = [f"# {app}: performance ({'higher' if hib else 'lower'} is better per test)\n"]
+    # Configurations that were attempted and produced no usable run must be named: a table generated only from
+    # what worked cannot be distinguished from one where nothing else was tried (2026-09-08, SQLite -wp).
+    attempted = sorted(d for d in os.listdir(os.path.join(root, app))
+                       if os.path.isdir(os.path.join(root, app, d))) if os.path.isdir(os.path.join(root, app)) else []
+    empty = []
+    for c in attempted:
+        if c in per_cfg and per_cfg[c].get("runs"): continue
+        why = ""
+        for mj in sorted(glob.glob(os.path.join(root, app, c, "run*", "meta.json"))):
+            try: m = json.load(open(mj))
+            except Exception: continue
+            if m.get("error"): why = str(m["error"]).strip().split("\n")[-1][:120]; break
+            if m.get("rc"): why = f"rc={m['rc']}"
+        empty.append((c, why or "no clean run"))
+    if empty:
+        # A leg still running looks the same as a failed one here, so say when the snapshot was taken.
+        lines.append(f"**Attempted but not measured** (as of {__import__('datetime').datetime.now():%Y-%m-%d %H:%M}, "
+                     "so a leg still in progress will list its unfinished configurations)**:** " + "; ".join(f"`{c}` ({w})" for c, w in empty) + "\n")
+    # The milder form of the same failure: a configuration that quietly ran fewer repetitions than its peers.
+    # The N column shows it, but only if the reader compares rows; say it in words.
+    if per_cfg:
+        nmax = max(i["n"] for i in per_cfg.values())
+        short = [(c, i["n"], i.get("skipped", 0)) for c, i in per_cfg.items() if i["n"] < nmax]
+        if short:
+            lines.append("**Fewer repetitions than the leg's N=%d:** " % nmax
+                         + "; ".join(f"`{c}` N={n}" + (f", {s} discarded" if s else "") for c, n, s in short) + "\n")
     sess = os.path.join(root, app, "session.json"); s = json.load(open(sess)) if os.path.exists(sess) else {}
     lines.append(f"Session: mode={s.get('mode')} cpuset={s.get('cpuset')} governor={s.get('governor')} no_turbo={s.get('no_turbo')} host={s.get('host')} started={s.get('started')}\n")
     base_t = per_cfg.get("tsan"); base_o = per_cfg.get("orig")
@@ -125,22 +173,35 @@ def report_app(root, app, per_cfg, hib, statics, out_rows):
             if not xs: cells.append("—"); continue
             m, sd = mean_sd(xs); cells.append(f"{st.median(xs):.4g} ({m:.4g} ± {sd:.2g}, {100*sd/m if m else 0:.1f} %)")
         lines.append(f"| {cfg} | {info['n']} | " + " | ".join(cells) + " |")
+    stable = stable_tests(per_cfg, tests) if base_t else None
+    noisy = [t for t in tests if t not in stable] if stable else []
     lines.append("\n## Speedup vs stock TSan (SU) and slowdown vs native (SD), on medians; geometric mean over tests; 95 % bootstrap interval\n")
-    lines.append("| config | label | N | SU geomean [95 %] | SD geomean [95 %] | static sites | modes | per-test SU |")
-    lines.append("|---|---|---|---|---|---|---|---|")
+    if noisy:
+        lines.append(f"**SU stable** repeats the speedup over the {len(stable)} of {len(tests)} subtests whose pooled "
+                     "run-to-run CV, taken over every configuration rather than off the baseline alone, is at most 5 %. "
+                     "The set is a property of the workload, not of a configuration, and applies to every row alike. "
+                     "Excluded here: "
+                     + "; ".join(f"`{t}` (pooled CV {100*(pooled_cv(per_cfg, t) or 0):.1f} %)" for t in noisy)
+                     + ". Report the all-subtest column as the headline and this one as what the data can resolve.\n")
+    lines.append("| config | label | N | SU geomean [95 %] | SU stable [95 %] | SD geomean [95 %] | static sites | modes | per-test SU |")
+    lines.append("|---|---|---|---|---|---|---|---|---|")
     for cfg, info in per_cfg.items():
-        su = sd = "—"; per = ""
+        su = sus = sd = "—"; per = ""
         if base_t and cfg != "tsan":
             rs = {t: ratio(med(cfg, t), med("tsan", t), hib) for t in tests if t in info["runs"] and t in base_t["runs"]}
             lo, hi = bootstrap_geomean_ratio(info["runs"], base_t["runs"], hib)
             su = f"{geomean(rs.values()):.3f} [{lo:.3f}, {hi:.3f}]"; per = ", ".join(f"{t}:{v:.2f}" for t, v in rs.items())
+            if noisy:
+                rss = {t: v for t, v in rs.items() if t in stable}
+                los, his = bootstrap_geomean_ratio(info["runs"], base_t["runs"], hib, only=stable)
+                if rss: sus = f"{geomean(rss.values()):.3f} [{los:.3f}, {his:.3f}]"
         if base_o and cfg != "orig":
             rs = {t: 1 / ratio(med(cfg, t), med("orig", t), hib) for t in tests if t in info["runs"] and t in base_o["runs"]}
             lo, hi = bootstrap_geomean_ratio(base_o["runs"], info["runs"], hib)   # orig vs cfg = slowdown
             sd = f"{geomean(rs.values()):.2f} [{lo:.2f}, {hi:.2f}]"
         stc = statics.get((app, cfg), {}).get("memory_access_sites", "—")
-        lines.append(f"| {cfg} | {label(cfg)} | {info['n']} | {su} | {sd} | {stc} | {','.join(info['modes'])} | {per} |")
-        out_rows.append({"app": app, "config": cfg, "label": label(cfg), "N": info["n"], "SU": su, "SD": sd, "static_sites": stc, "modes": ",".join(info["modes"])})
+        lines.append(f"| {cfg} | {label(cfg)} | {info['n']} | {su} | {sus} | {sd} | {stc} | {','.join(info['modes'])} | {per} |")
+        out_rows.append({"app": app, "config": cfg, "label": label(cfg), "N": info["n"], "SU": su, "SU_stable": sus, "SD": sd, "static_sites": stc, "modes": ",".join(info["modes"])})
     open(os.path.join(root, f"perf_{app}.md"), "w").write("\n".join(lines) + "\n")
     json.dump({cfg: {"n": i["n"], "skipped": i["skipped"], "modes": i["modes"], "runs": i["runs"]} for cfg, i in per_cfg.items()},
               open(os.path.join(root, f"perf_{app}.json"), "w"), indent=1)
@@ -166,8 +227,8 @@ def main():
         if per_cfg: report_app(root, app, per_cfg, hib, statics, rows)
         else: print(f"{app}: no runs", file=sys.stderr)
     with open(os.path.join(root, "perf_summary.md"), "w") as fh:
-        fh.write(f"# P5 summary — {os.path.basename(root)}\n\nSU = speedup vs stock TSan, SD = slowdown vs native; geometric mean over the app's tests on per-test medians of N undisturbed runs; [95 % bootstrap interval].\n\n")
-        fh.write("| app | config | label | N | SU | SD | static sites | modes |\n|---|---|---|---|---|---|---|---|\n")
-        for r in rows: fh.write(f"| {r['app']} | {r['config']} | {r['label']} | {r['N']} | {r['SU']} | {r['SD']} | {r['static_sites']} | {r['modes']} |\n")
+        fh.write(f"# P5 summary — {os.path.basename(root)}\n\nSU = speedup vs stock TSan, SD = slowdown vs native; geometric mean over the app's tests on per-test medians of N undisturbed runs; [95 % bootstrap interval]. **SU stable** is the same speedup over the subtests whose stock-TSan baseline CV is at most 5 %, the set chosen once from the baseline and applied to every configuration alike; it is empty where every subtest is inside that bound. Read SU as the headline and SU stable as what the data can resolve; the per-app file names the excluded subtests and their baseline CV.\n\n")
+        fh.write("| app | config | label | N | SU | SU stable | SD | static sites | modes |\n|---|---|---|---|---|---|---|---|---|\n")
+        for r in rows: fh.write(f"| {r['app']} | {r['config']} | {r['label']} | {r['N']} | {r['SU']} | {r.get('SU_stable','—')} | {r['SD']} | {r['static_sites']} | {r['modes']} |\n")
     print(f"summary -> {os.path.join(root, 'perf_summary.md')}")
 if __name__ == "__main__": main()

@@ -108,17 +108,17 @@ if [ -f "$BUILD_SUBDIR/threadtest3" ] && [ ! -f "$BUILD_SUBDIR/build_info.txt" ]
     OLD_STAMP=$(date -r "$BUILD_SUBDIR/threadtest3" +%Y%m%d)
     OLD_DIR="${BUILD_ROOT:-build}/old-builds"
     mkdir -p "$OLD_DIR"
-    echo "Archiving paper-era build $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
-    rm -rf "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
-    mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+    echo "Archiving paper-era build $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
+    rm -rf "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
+    mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
 elif [ -f "$BUILD_SUBDIR/build_info.txt" ]; then
     # A build of another compiler is archived by its stamp, never overwritten in place (CLAUDE.md); a build of
     # the same compiler is simply rebuilt.
     OLD_STAMP=$(build_stamp_of "$BUILD_SUBDIR"); CUR_STAMP=$(compiler_stamp_of "$TARGET_CC")
     if [ -n "$OLD_STAMP" ] && [ "$OLD_STAMP" != "$CUR_STAMP" ]; then
         OLD_DIR="${BUILD_ROOT:-build}/old-builds"; mkdir -p "$OLD_DIR"
-        echo "Archiving build of another compiler $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
-        rm -rf "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"; mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}.$OLD_STAMP"
+        echo "Archiving build of another compiler $BUILD_SUBDIR -> $OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
+        rm -rf "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"; mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
     fi
 fi
 mkdir -p "$BUILD_SUBDIR"

@@ -28,6 +28,12 @@ p5_cpu_snapshot() { awk '/^cpu /{print $2+$3+$4+$6+$7+$8, $5}' /proc/stat; }   #
 p5_loadavg() { cut -d' ' -f1-3 /proc/loadavg; }
 p5_governor() { cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor 2>/dev/null; }
 p5_turbo() { cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null; }
+# Clock regime (lab benchmarking guide): with no bench session the node is in power saving mode, 0.8-4.3 GHz,
+# variable with load; with a bench session active it runs at a fixed 1.9 GHz with idle states disabled. The
+# regime is recorded per run so runs from the two regimes are never mixed in one table.
+p5_bench_session() { systemctl list-units 'bench-*' --no-legend 2>/dev/null | grep -q . && echo 1 || echo 0; }
+p5_regime() { [ "$(p5_bench_session)" = 1 ] && echo "bench-fixed" || echo "powersave-variable"; }
+p5_cpu_mhz() { local c=${1:-4}; awk '{printf "%.0f", $1/1000}' "/sys/devices/system/cpu/cpu$c/cpufreq/scaling_cur_freq" 2>/dev/null || echo 0; }
 # app -> dir of the app's scripts, binary path for a config, "kind"
 p5_app_dir() { case "$1" in memcached) echo "$P5_ROOT/nosql/memcached";; redis) echo "$P5_ROOT/nosql/redis";; sqlite) echo "$P5_ROOT/sql/sqlite";; mysql) echo "$P5_ROOT/sql/mysql";; ffmpeg) echo "$P5_ROOT/projects/ffmpeg";; *) p5_die "unknown app $1";; esac; }
 p5_binary() {  # app cfg -> binary of this configuration built by $P5_HASH (canonical dir, else old-builds/<dir>.<hash>)

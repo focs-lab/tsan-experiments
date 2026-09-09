@@ -148,3 +148,30 @@ fdf7a4dd41e9, sweep hash d3bf9f8c39fe"), which is the gate working. `p5_binary` 
 hash: the canonical directory when its stamp matches, else `old-builds/<dir>.<hash>`; verified for all five
 applications on both hashes. Nothing was moved.
 
+## Second stage-b copy: tsan-perf-c38c1e7e94ec (2026-09-08)
+
+perf/stage-b2 = stage-b (shape 22) + the parser join-sharing fix + the Chromium pointee-views fix. Frozen,
+counters OFF, gates identical to d3bf9f8c39fe (IR suites 125/0/1, check-tsan 371/0/90/1).
+
+**Compile time — both cliffs gone.** MySQL end to end: `orig` 304 s, `tsan` 314 s, `tsan-sound` **325 s**
+against 1 693 s on d3bf9f8c39fe and ~10 900 s on 729521af8965 (33x); `sql_yacc.cc` no longer stands out in the
+build log, so the EA configurations now cost ~5 % more than stock instead of 5x.
+
+**Static counts vs d3bf9f8c39fe:** stock and every non-EA analysis identical; every EA-containing configuration
+**−1 site** per binary (Redis 37 608 → 37 607 etc., FFmpeg 497 410 → 497 409). Attributed per function:
+Redis `string2ld` 5 → 4, FFmpeg `avformat_match_stream_specifier` 7 → 6 — both a read *through* a
+`strtol`/`strtold` end pointer on a local buffer. That is shape 22's *precision* half: the end pointer now has a
+recorded pointee (the local buffer) instead of being an unknown loaded pointer, so the read is soundly elided.
+Its soundness half (which adds instrumentation where such a slot is later published) fires nowhere in these
+applications, as tsan-dev's corpus predicted.
+
+**Counting caveat:** FFmpeg links several shared libraries defining same-named static functions (`filter`,
+`init`, `flush`, `write_packet`, …); a per-function diff keyed on the function name alone pairs them wrongly and
+prints spurious ±N rows that cancel. Key per-function diffs by (file, function). Totals are unaffected.
+
+**Accepted 2026-09-08 02:32**, 68 builds / 0 failures: memcached, SQLite and MySQL identical in every
+configuration; Redis and FFmpeg −1 in every EA row (their one `strtold`/`strtol` end-pointer helper each).
+MySQL build times on c38c1e7e94ec: orig 304 s, tsan 314 s, sound 325 s, ea 346 s (worst EA row 1.14x stock,
+against 5.4x on d3bf9f8c39fe and ~35x on 729521af8965). Stage B measurement rows stay on d3bf9f8c39fe: the two
+copies differ by one site in two applications and otherwise only in compile time.
+

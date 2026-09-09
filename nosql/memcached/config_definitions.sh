@@ -39,3 +39,13 @@ CONFIG_DETAILS["tsan-sound"]="-mllvm -tsan-use-escape-analysis-global \
 # symbol names, outside the linked IR, no threads, no callbacks — list from the tsan-dev lane, 2026-09-05):
 # memcached's libevent setup calls before the first thread, plus glibc 2.38's __isoc23_* conversion aliases
 # and getsubopt/__getdelim/preadv, which neither TargetLibraryInfo nor the built-in list knows yet.
+# tsan-yoff: turn the yield copy's seven changes off inside the same compiler
+# (/extra/alexey/builds/tsan-yield-d98873cda906, where all six switches default to on). A "-yoff" row is the
+# A/B partner of the same configuration without the suffix: same compiler, same binary layout, only the yield
+# changes differ, so the pair isolates them from the stage-b2 changes underneath.
+CONFIG_DETAILS["tsan-yoff"]="-mllvm -tsan-dynstc-runs-across-thread-free-calls=false \
+                             -mllvm -tsan-de-atomics-by-ordering=false \
+                             -mllvm -tsan-de-cover-containment=false \
+                             -mllvm -tsan-swmr-readonly-call-args=false \
+                             -mllvm -tsan-ea-later-escape-uses-summaries=false \
+                             -mllvm -tsan-intercepted-call-table=false"

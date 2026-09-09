@@ -493,6 +493,9 @@ if [ "$COMPILE" = true ]; then
                     # Rebuttal (plan P2/P3): the four sound analyses, i.e. AllOpt without DE.
                     sound)       TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global -mllvm -tsan-use-lock-ownership -mllvm -tsan-use-single-threaded -mllvm -tsan-use-swmr" ;;
                     tfn)         TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-thread-free-names=sd_notify,__isoc23_strtol,__isoc23_strtoul,__isoc23_strtoll,__isoc23_strtoull,__isoc23_sscanf,getsubopt,__getdelim,preadv" ;;   # vouched thread-free externals (sd_notify + glibc 2.38 __isoc23_* aliases)
+                    # yoff: the yield copy's seven changes turned off inside the same compiler, so that a
+                    # "-yoff" row is the A/B partner of the same option without the suffix.
+                    yoff)        TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-dynstc-runs-across-thread-free-calls=false -mllvm -tsan-de-atomics-by-ordering=false -mllvm -tsan-de-cover-containment=false -mllvm -tsan-swmr-readonly-call-args=false -mllvm -tsan-ea-later-escape-uses-summaries=false -mllvm -tsan-intercepted-call-table=false" ;;
                     *) echo "Error: unknown option token '$TOKEN' in '$OPTION'" >&2; exit 1 ;;
                 esac
             done

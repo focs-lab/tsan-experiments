@@ -5,6 +5,11 @@ P5_STAGE_A="orig tsan tsan-sound tsan-dom-ea-lo-st-swmr tsan-dom_peeling-ea-lo-s
 P5_STAGE_B_EXTRA="tsan-st tsan-stmt tsan-swmr tsan-lo tsan-ea tsan-dom tsan-dom_peeling tsan-sound-wp tsan-sound-tfn tsan-sound-tfn-wp"
 P5_TFN_APPS="memcached"   # -tsan-thread-free-names rows; Redis dropped: its list changes 0 sites per unit and 0 beyond the WP summaries (both built on d3bf9f8c39fe)
 P5_ALL="$P5_STAGE_A $P5_STAGE_B_EXTRA"
+# Yield stage: the A/B pairs measured inside /extra/alexey/builds/tsan-yield-d98873cda906, where the seven yield
+# changes default to on and "-yoff" turns all six switches off. Both halves of a pair come from the one compiler,
+# so the pair isolates the yield changes from the stage-b2 changes underneath them. No -wp rows here.
+P5_YIELD="orig tsan tsan-yoff tsan-stmt tsan-stmt-yoff tsan-sound tsan-sound-yoff tsan-dom_peeling-ea-lo-st-swmr tsan-dom_peeling-ea-lo-st-swmr-yoff"
+P5_YIELD_APPS="memcached redis sqlite ffmpeg"
 # apps whose build scripts consume whole-program summaries (the -wp rows exist only for these)
 P5_WP_APPS="memcached redis sqlite"
 # label for tables: AllOpt+peel = the paper's AllOpt; AllOpt-peel = dominance without loop peeling
@@ -12,6 +17,10 @@ p5_label() {
   case "$1" in
     tsan-dom-ea-lo-st-swmr) echo "AllOpt-peel";; tsan-dom_peeling-ea-lo-st-swmr) echo "AllOpt+peel";;
     tsan-dom_peeling-ea-lo-st-swmr-wp) echo "AllOpt+peel (WP summaries)";; tsan-sound-wp) echo "sound (WP summaries)";;
+    tsan-yoff) echo "TSan (yield off)";; tsan-stmt-yoff) echo "DynSTC (yield off)";;
+    tsan-sound-yoff) echo "sound (yield off)";;
+    tsan-dom_peeling-ea-lo-st-swmr-yoff) echo "AllOpt+peel (yield off)";;
+    tsan-stmt) echo "DynSTC";;
     *) echo "$1";;
   esac
 }

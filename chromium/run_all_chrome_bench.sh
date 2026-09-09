@@ -43,7 +43,15 @@ for ((rep=1; rep<=REPS; rep++)); do
            --extra-browser-args="--no-sandbox --disable-gpu")
       t0=$(date +%s); load0=$(cut -d' ' -f1 /proc/loadavg)
       if [ "$B" = orig ]; then unset TSAN_OPTIONS; else export TSAN_OPTIONS="${TSAN_OPTIONS:+$TSAN_OPTIONS }$TSAN_EXTRA_OPTIONS"; fi
-      set +e; "${RUNNER[@]}" taskset -c "$CPUSET" "${CMD[@]}" > "$RUN_DIR/run_chrome-$B.log" 2>&1; rc=$?; set -e
+      # One suite on one build is a timing measurement, so it takes the machine job lock per run (the same
+      # rule and wrapper the application legs use): never beside another lane's job, never beside one of our
+      # own measurements. The wrapper does the pinning, so there is no second taskset here.
+      set +e
+      /home/alexey/bin/machine-lock --lane tsan-exp --measure --mem "${CHROME_MEAS_MEM:-48G}" \
+        --minutes "${CHROME_MEAS_MINUTES:-90}" --cpus "$CPUSET" \
+        --why "chromium $TEST chrome-$B rep$rep" -- "${RUNNER[@]}" "${CMD[@]}" \
+        > "$RUN_DIR/run_chrome-$B.log" 2>&1; rc=$?
+      set -e
       t1=$(date +%s)
       printf '{"test": "%s", "build": "%s", "rep": %d, "rc": %d, "seconds": %d, "start": %d, "cpuset": "%s", "loadavg_before": %s, "loadavg_after": %s, "tsan_options": "%s"}\n' \
         "$TEST" "$B" "$rep" "$rc" "$((t1-t0))" "$t0" "$CPUSET" "$load0" "$(cut -d' ' -f1 /proc/loadavg)" "${TSAN_OPTIONS:-}" >> "$LOG"

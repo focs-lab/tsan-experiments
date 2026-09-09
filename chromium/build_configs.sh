@@ -5,16 +5,26 @@
 set -uo pipefail
 cd "$(dirname "$0")"; HERE=$PWD
 HASH=${1:?hash}; shift; CFGS="${*:-tsan tsan-sound tsan-dom-ea-lo-st-swmr}"
-SRC=${SRC_DIR:-/extra/alexey/chromium/chromium/src}; ROOT=/extra/alexey/builds/tsan-dev-$HASH
+SRC=${SRC_DIR:-/extra/alexey/chromium/chromium/src}
+# the frozen copy is <lane>-<hash>; the lane is not always "tsan-dev" (stage B measures tsan-perf/tsan-yield),
+# and the -evictstats copy is a counters build, never a measurement compiler
+ROOT=${LLVM_TSAN_ROOT:-$(ls -d /extra/alexey/builds/*-"$HASH" 2>/dev/null | grep -vE -- '-evictstats$' | head -1)}
+[ -n "$ROOT" ] || { echo "no frozen compiler copy for $HASH under /extra/alexey/builds"; exit 1; }
 SCRATCH=${SCRATCH:-/home/alexey/tsan-experiments/.scratch}; LOGS=/extra/alexey/chromium/logs; mkdir -p "$LOGS" "$SCRATCH"
 JOBS=${NINJA_JOBS:-40}; NICE="nice -n 10 ionice -c2 -n7"
-# builds hold the P5 benchmark lock shared: concurrent with other builds, never with a benchmark
-exec 9>"${P5_LOCK:-/tmp/p5-bench.lock}"; flock -s 9
+# Machine-wide job lock (the rule agreed across lanes, 2026-09-07): a Chromium build runs 40+ sustained cores,
+# so it is exclusive — never beside another lane's job and never beside one of our measurements. The sidecar
+# names the holder so a waiter sees what it is queueing behind.
+MEMLOCK="${MACHINE_MEMLOCK:-/home/alexey/bin/logs/machine-memory.lock}"; [ -e "$MEMLOCK" ] || { : > "$MEMLOCK"; chmod 666 "$MEMLOCK" 2>/dev/null; }
+exec 9>"$MEMLOCK"; echo "[$(date '+%F %T')] waiting for the machine job lock (exclusive: Chromium build)"; flock -x 9
+printf 'lane=tsan-exp\npid=%s\nmode=exclusive\nreason=Chromium build (%s), ninja -j%s\nstart=%s\nexpected_minutes=%s\ncpus=4-%s\nwhy=P5 Chromium build\n' \
+  "$$" "$HASH" "$JOBS" "$(date -Iseconds)" "$((370 * $(echo $CFGS | wc -w)))" "$((3 + JOBS))" > "$MEMLOCK.holder" 2>/dev/null
+chmod 666 "$MEMLOCK.holder" 2>/dev/null; trap 'rm -f "$MEMLOCK.holder" 2>/dev/null' EXIT
 export PATH=/extra/alexey/chromium/depot_tools:$PATH
 log() { echo "[$(date '+%F %T')] $*" | tee -a "$LOGS/build_configs.$HASH.log"; }
 [ -x "$ROOT/bin/clang" ] || { echo "no frozen copy $ROOT"; exit 1; }
 "$ROOT/bin/clang" --version | head -1 | grep -q "$HASH" || { echo "$ROOT/bin/clang does not stamp $HASH"; exit 1; }
-grep -q "$HASH" "$ROOT/TSAN_AUDIT_HASH" || { echo "TSAN_AUDIT_HASH mismatch"; exit 1; }
+grep -q "$HASH" "$ROOT/TSAN_AUDIT_HASH" || { echo "TSAN_AUDIT_HASH mismatch in $ROOT"; exit 1; }
 grep -q "tsan_extra_cflags" "$SRC/build/config/sanitizers/BUILD.gn" || { echo "GN patch (patches/tsan_extra_cflags.patch) not applied"; exit 1; }
 wait_no_foreign_bench() { while systemctl list-units 'bench-*' --no-legend 2>/dev/null | grep -q .; do log "bench-* active; waiting"; sleep 300; done; }
 for cfg in $CFGS; do
