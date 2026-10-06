@@ -27,6 +27,7 @@ hashes, workload parameters) and <out>/runs.jsonl (one line per executed step).
 import argparse
 import datetime as dt
 import hashlib
+import re
 import json
 import os
 import shlex
@@ -40,7 +41,9 @@ from typing import Dict, List, Optional
 
 HERE = Path(__file__).resolve().parent
 EXP_ROOT = HERE.parent.parent                      # ~/tsan-experiments
-DEFAULT_LLVM_ROOT = Path("/home/alexey/dev/llvm-project-focs-lab/llvm/build")
+# A default, not a fact: this lab's worktree, overridable by LLVM_TSAN_ROOT or --llvm-root. It is also
+# a live working build that must never be measured from, which is why every caller overrides it.
+DEFAULT_LLVM_ROOT = Path(os.environ.get("LLVM_TSAN_ROOT", str(Path.home() / "dev/llvm-project-focs-lab/llvm/build")))
 
 
 def now() -> str:
@@ -344,8 +347,13 @@ class Memcached(App):
     def run_once(self, cfg, run):
         wl = self.workload()
         self.ctx.require_port_free(self.port, "memcached")
-        srv = self.ctx.start_server([str(self.binary(cfg)), "-c", "4096", "-t", str(wl["server_threads"]),
-                                     "-p", str(self.port), "-U", "0"],
+        # -u root only as root: memcached refuses to start as root without it, and below uid 0 it would
+        # ask the OS to drop to a user we are not. Same fix as bench_one.sh's memcached launch.
+        cmd = [str(self.binary(cfg)), "-c", "4096", "-t", str(wl["server_threads"]),
+               "-p", str(self.port), "-U", "0"]
+        if os.getuid() == 0:
+            cmd += ["-u", "root"]
+        srv = self.ctx.start_server(cmd,
                                     cfg=cfg, run=run, tag="memcached", cwd=self.root, env=self.ctx.tsan_env(cfg, run))
         try:
             if not self.ctx.wait_port(self.port, srv):
@@ -498,6 +506,24 @@ def compiler_info(llvm_root: Path, check_ninja: bool) -> dict:
         info["git_branch"] = sh(["git", "-C", str(tree), "branch", "--show-current"])
         info["git_head"] = sh(["git", "-C", str(tree), "rev-parse", "HEAD"])
         info["git_dirty_files"] = len(sh(["git", "-C", str(tree), "status", "--porcelain", "--untracked-files=no"]).splitlines())
+        info["compiler_head_source"] = "git rev-parse in the source tree"
+    # A FROZEN COPY HAS NO .git AND IS THE MANDATED WAY TO MEASURE. `tree` is llvm_root.parent.parent, which
+    # for a frozen per-hash copy resolves to its parent — no repository, so git_head
+    # came out EMPTY on exactly the copies the rules require. Four of seven manifests on disk are empty for
+    # this reason, and the directory name happened to carry the hash, which is luck rather than provenance.
+    # Fall back to the two stamps a frozen copy does carry, in order of directness.
+    if not info.get("git_head"):
+        stamp = llvm_root / "TSAN_AUDIT_HASH"
+        if stamp.exists():
+            m = re.search(r"[0-9a-f]{40}", stamp.read_text())
+            if m:
+                info["git_head"] = m.group(0)
+                info["compiler_head_source"] = "TSAN_AUDIT_HASH in the frozen copy"
+    if not info.get("git_head"):
+        m = re.search(r"[0-9a-f]{40}", info.get("clang_version") or "")
+        if m:
+            info["git_head"] = m.group(0)
+            info["compiler_head_source"] = "the 40-hex commit printed by clang --version"
     if check_ninja:
         # Dry run only; tells whether the binaries are current w.r.t. the sources.
         info["ninja_pending"] = sh(["ninja", "-n", "-C", str(llvm_root)], timeout=300).splitlines()[-1:] or ["<none>"]
@@ -526,6 +552,15 @@ def write_manifest(ctx: Ctx, app: App, configs: List[str]):
             if cand.exists():
                 m["configs"][cfg]["build_info"] = cand.read_text()
                 break
+    # REFUSE TO WRITE A MANIFEST THAT CANNOT NAME ITS COMPILER. A preservation result is a claim about one
+    # compiler; a manifest without its identity cannot support that claim, and the directory name is not
+    # provenance. Better to fail here than to produce a tree that looks complete and cites nothing.
+    head = (m["compiler"].get("git_head") or "").strip()
+    if not re.fullmatch(r"[0-9a-f]{40}", head):
+        sys.exit("refusing to write a manifest with no compiler identity: git_head is "
+                 f"{head!r}. Looked for a git HEAD in the source tree, TSAN_AUDIT_HASH in "
+                 f"{ctx.llvm_root}, and a 40-hex commit in `clang --version`. A result whose compiler "
+                 "cannot be named supports no claim; fix the compiler prefix rather than the manifest.")
     with open(ctx.out / "manifest.json", "w") as fh:
         json.dump(m, fh, indent=1)
     return m

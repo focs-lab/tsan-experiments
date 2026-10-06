@@ -2,7 +2,7 @@
 """
 Parse ThreadSanitizer reports and compare race sets across build configurations.
 
-Used by the P2 (benchmark-level preservation) experiment of the ATC'26 rebuttal:
+Used by the benchmark-level race-report preservation experiment:
 each application is run N times per configuration with
     TSAN_OPTIONS="log_path=<dir>/<app>.<cfg>.<run> exitcode=0"
 (TSan appends ".<pid>" to log_path), and this script
@@ -235,7 +235,14 @@ class Report:
         for a in self.accesses:
             if "write" in a.op:
                 f = a.app_frame()
-                writers.append(f"{a.op}:{f.site_l1() if f else '?'}")
+                site = f.site_l1() if f else '?'
+                # A writer frame symbolized without a line (file only: the optimizer merged two stores
+                # into one line-0 location) cannot carry a line-level identity. Under --line0-function-level
+                # every writer site of such a function@file is keyed at function level, in every
+                # configuration alike ("equivalent": same function, the representative line may differ).
+                if f and f.file and f"{f.func}@{f.file}" in LINE0_FUNCTION_SITES:
+                    site = f"{f.func}@{f.file}"
+                writers.append(f"{a.op}:{site}")
         if not writers:                      # read/read cannot be a race; keep whatever there is
             writers = list(self._sites(1))
         return " | ".join([self.kind, *sorted(writers), loc])
@@ -246,6 +253,24 @@ class Report:
         d["key_l2"] = self.key_l2()
         d["key_l3"] = self.key_l3()
         return d
+
+
+# func@file of writer frames printed without a line in any run under comparison; filled by
+# line0_function_sites() only when preservation_verdict.py is given --line0-function-level (off by default).
+LINE0_FUNCTION_SITES: set = set()
+
+
+def line0_function_sites(runs) -> set:
+    """func@file of every application writer frame that some report printed with a file but no line."""
+    out = set()
+    for rr in runs:
+        for rep in rr.reports:
+            for a in rep.accesses:
+                if "write" in a.op:
+                    f = a.app_frame()
+                    if f and f.file and f.line in (None, 0):
+                        out.add(f"{f.func}@{f.file}")
+    return out
 
 
 def _parse_frame(line: str) -> Optional[Frame]:
