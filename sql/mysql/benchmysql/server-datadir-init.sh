@@ -6,4 +6,4 @@ source callmysql-export-main-vars.sh || exit $?
 
 echo Initializing MySQL with datadir \"$MYSQL_DATA_DIR\".
 
-$MYSQL_DIR/mysqld --initialize-insecure --datadir="$MYSQL_DATA_DIR" 2> server-datadir-init.stderr.log
+$MYSQL_DIR/mysqld ${MYSQL_RUN_AS_ROOT:+"$MYSQL_RUN_AS_ROOT"} --initialize-insecure --datadir="$MYSQL_DATA_DIR" 2> server-datadir-init.stderr.log

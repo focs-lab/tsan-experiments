@@ -9,7 +9,7 @@
 # Configuration
 #------------------------------------------------------------------------------
 # Compiler: tools/tsan_compiler.sh (sourced below, after SCRIPT_DIR is known) selects the
-# hardened prototype in ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set.  The old
+# hardened prototype in the prototype tree unless LLVM_TSAN_ROOT is set.  The old
 # LLVM_BUILD_DIR="$LLVM_PATH" is gone: ~/.bashrc exports LLVM_PATH=~/dev/llvm-project/llvm/build,
 # which since 2026-05 is a symlink to the unrelated llvm-capstone tree.
 LLVM_BUILD_DIR=""
@@ -42,7 +42,6 @@ TRACE_RAM_ROOT="/dev/shm"
 TRACES_COPIED=false
 TRACE_PIPE_PID=""
 RESULTS_FILE="$RESULTS_DIR/compilation_time.txt"
-STATS_FILE="$RESULTS_DIR/instr_count.txt"
 TSAN_TMP_DIR="/tmp/__tsan__"                   # ThreadSanitizer temporary directory
 
 #------------------------------------------------------------------------------
@@ -87,9 +86,8 @@ BUILD_OPTIONS="${BUILD_OPTIONS:-ea-lo-st-swmr-stmt}"
 COMPILE=true
 TESTS=true
 TRACE_MODE=false
-COUNT_INSTRUCTIONS=false
 
-export TSAN_OPTIONS="report_bugs=0"
+export TSAN_OPTIONS="report_bugs=0${TSAN_OPTIONS_EXTRA:+ $TSAN_OPTIONS_EXTRA}"   # tier A 25 Sep: runtime options of T9/T10 (dynstc_rt=1); restored 1 Oct (the repo copy had lost it)
 
 usage() {
     echo "Usage: $0 [ --compile-only | --test-only | trace | --help ]"
@@ -221,9 +219,6 @@ for arg in "$@"; do
         trace)
             TRACE_MODE=true
             ;;
-        --instr-count)
-            COUNT_INSTRUCTIONS=true
-            ;;
     esac
 done
 
@@ -330,8 +325,13 @@ function run {
     local throughput
 
     echo -n "$TEST " | tee -a "$FILE"
-    output=$(redis-benchmark/src/redis-benchmark \
-        -P 1024 \
+    # -c is redis-benchmark's concurrent client count. It was never passed, so every result so far used the
+    # tool's default of 50; REDIS_BENCH_CLIENTS makes it a knob for the concurrency sweep while leaving that
+    # default in place, so an unset environment reproduces every earlier run exactly.
+    # REDIS_BENCH_PIPELINE / REDIS_BENCH_DATASIZE (30 Sep): workload-variant screening; defaults are the values every earlier run used (-P 1024, redis-benchmark's own -d 3).
+    output=$(${REDIS_CLIENT_CPUS:+taskset -c $REDIS_CLIENT_CPUS} redis-benchmark/src/redis-benchmark \
+        -P "${REDIS_BENCH_PIPELINE:-1024}" -d "${REDIS_BENCH_DATASIZE:-3}" \
+        -c "${REDIS_BENCH_CLIENTS:-50}" \
         -n "$REQUESTS" \
         -t "$TEST" 2>&1)
     status=$?
@@ -362,7 +362,13 @@ if [ "$COMPILE" = true ]; then
     log "Downloading Redis"
     cd "$BENCH_POLYGON_DIR" || exit 1
     mkdir -p "$RESULTS_DIR"
-    wget "$BENCH_ARCHIVE_URL" 2> /dev/null
+    # THE ONLY UNVERIFIED DOWNLOAD IN THE ARTIFACT, UNTIL NOW. This was a bare `wget` with stderr sent to
+    # /dev/null, so Redis alone among the five applications fetched its source with no sha256 check and no
+    # visible failure -- while third-party/SOURCES.md promises "the harness verifies every archive against
+    # this list before unpacking and refuses a missing, unpinned or mismatching one", and redis.sh
+    # --compile-only is on the reproduced tier's live path. fetch_archive.sh fetches if absent and always
+    # verifies against tools/source_archives.sha256 before returning. (Audit, 2026-09-19.)
+    "$SCRIPT_DIR/../../tools/fetch_archive.sh" "$BENCH_ARCHIVE_NAME" || exit 1
     BENCH_ARCHIVE_DIR=$(tar --list --file "$BENCH_ARCHIVE_NAME" | head -1)
 
     log "Unpacking redis-benchmark"
@@ -400,11 +406,6 @@ if [ "$COMPILE" = true ]; then
     mkdir -p "$RESULTS_DIR"
     echo "Compilation time (in seconds):" > "$RESULTS_FILE"
     log "Results file '$RESULTS_FILE' has been cleared."
-    # Clear/create stats file
-    if [ "$COUNT_INSTRUCTIONS" = true ]; then
-        echo "Instrumented instruction count:" > "$STATS_FILE"
-        log "Stats file '$STATS_FILE' has been cleared."
-    fi
     echo ""
 
     # Build loop
@@ -419,7 +420,7 @@ if [ "$COMPILE" = true ]; then
         if [ -d "$DIR" ]; then
             if [ -f "$DIR/src/build_info.txt" ]; then
                 # Same compiler stamp: a rebuild, delete. Another stamp: archive as old-builds/<dir>.<stamp>
-                # (CLAUDE.md: builds of another hash are never overwritten). build_info.txt lives in src/.
+                # (lab rule: builds of another hash are never overwritten). build_info.txt lives in src/.
                 OLD_STAMP=$(build_stamp_of "$DIR/src"); CUR_STAMP=$(compiler_stamp_of "$TSAN_CC")
                 if [ -n "$OLD_STAMP" ] && [ "$OLD_STAMP" = "$CUR_STAMP" ]; then
                     rm -rf "$DIR"
@@ -460,15 +461,22 @@ if [ "$COMPILE" = true ]; then
             fi
         elif [[ "$OPTION" = "tsan" ]]
         then
-            if ! SANITIZER=thread USE_JEMALLOC=no make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
+            # TSAN_EXTRA_MLLVM reaches plain `tsan` too: this branch passes no -mllvm of its own, so without
+            # it the flag-exists guard would find redis/tsan bare while every other row carried the flag.
+            # Set TSAN_FLAGS rather than passing REDIS_CFLAGS inline: write_build_info records
+            # REDIS_CFLAGS=${TSAN_FLAGS}, so an inline value reaches the COMPILER but not the PROVENANCE
+            # FILE — and a guard that reads build_info.txt then reports a flag missing that was actually
+            # passed. The record must say what was done.
+            TSAN_FLAGS="${TSAN_EXTRA_MLLVM:-}"
+            if ! SANITIZER=thread USE_JEMALLOC=no REDIS_CFLAGS="$TSAN_FLAGS" make redis-server -j "$(nproc)" > "$BUILD_LOG" 2>&1; then
                 echo "Error: build failed for '$OPTION'. See $BUILD_LOG" >&2
                 exit 1
             fi
         else
-            TSAN_FLAGS=""
+            TSAN_FLAGS="${TSAN_EXTRA_MLLVM:-}"
             SUMMARY_NOTE="summaries: none (per-TU analyses only)"
             if [ "$USE_SUMMARIES" = 1 ]; then
-                # Sound summaries interface (tsan-dev fafbebedb41e+): files are tagged with
+                # Sound summaries interface (fafbebedb41e+): files are tagged with
                 # "# tsan-summary-id: <tag>", read from -tsan-summary-dir with the matching
                 # -tsan-summary-id, never overwritten by a seeded compile.
                 SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
@@ -490,18 +498,28 @@ if [ "$COMPILE" = true ]; then
                     ea)          TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global" ;;
                     dom)         TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis" ;;
                     dom_peeling) TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-dominance-analysis -mllvm -tsan-use-loop-peeling=true" ;;
-                    # Rebuttal (plan P2/P3): the four sound analyses, i.e. AllOpt without DE.
+                    # The four sound analyses, i.e. AllOpt without DE.
                     sound)       TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-use-escape-analysis-global -mllvm -tsan-use-lock-ownership -mllvm -tsan-use-single-threaded -mllvm -tsan-use-swmr" ;;
                     tfn)         TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-thread-free-names=sd_notify,__isoc23_strtol,__isoc23_strtoul,__isoc23_strtoll,__isoc23_strtoull,__isoc23_sscanf,getsubopt,__getdelim,preadv" ;;   # vouched thread-free externals (sd_notify + glibc 2.38 __isoc23_* aliases)
-                    # yoff: the yield copy's seven changes turned off inside the same compiler, so that a
-                    # "-yoff" row is the A/B partner of the same option without the suffix.
-                    yoff)        TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-dynstc-runs-across-thread-free-calls=false -mllvm -tsan-de-atomics-by-ordering=false -mllvm -tsan-de-cover-containment=false -mllvm -tsan-swmr-readonly-call-args=false -mllvm -tsan-ea-later-escape-uses-summaries=false -mllvm -tsan-intercepted-call-table=false" ;;
+                    # nofe: shadow-stack maintenance off; accesses still instrumented, report stacks lose
+                    # their calling context (L1/L2 keys move, L3 does not). A profiling arm.
+                    nofe)        TSAN_FLAGS="$TSAN_FLAGS -mllvm -tsan-instrument-func-entry-exit=false" ;;
                     *) echo "Error: unknown option token '$TOKEN' in '$OPTION'" >&2; exit 1 ;;
                 esac
             done
             # EXTRA_TSAN_FLAGS: diagnostic flags appended verbatim (e.g. -mllvm -tsan-ea-flow-insensitive);
             # combine with BUILD_TAG so that such builds never replace the canonical redis-<option> dirs.
             TSAN_FLAGS="$TSAN_FLAGS ${EXTRA_TSAN_FLAGS:-}"
+            # The CFG-TABLE proof is used only for the program it was made on (A57c L3b, 5 Oct): config.c's compile gets
+            # the summaries' program digest (gen_summaries.sh, which recorded its compile flags, as this build does).
+            # config.c's compile compares that value with the record's program field (both from the summaries' linked
+            # IR); it computes no digest of its own, so this build's own recorded flags need not match. The flag
+            # arrives through TSAN_EXTRA_MLLVM, which TSAN_FLAGS starts from and gen_summaries.sh keys on.
+            case " $TSAN_FLAGS " in *" -tsan-phase-config-table-proof "*)
+                PROGRAM_DIGEST=$(head -1 "$SUMMARIES_DIR/program-digest.txt" 2>/dev/null)
+                [ -n "$PROGRAM_DIGEST" ] || { echo "Error: -tsan-phase-config-table-proof without $SUMMARIES_DIR/program-digest.txt (regenerate with gen_summaries.sh)" >&2; exit 1; }
+                TSAN_FLAGS="$TSAN_FLAGS -grecord-command-line -mllvm -tsan-phase-program-digest=$PROGRAM_DIGEST" ;;
+            esac
 
             # The flags go through REDIS_CFLAGS, not CFLAGS: a CFLAGS value coming from the
             # environment is auto-exported by make to the deps/ sub-make together with the
@@ -537,15 +555,6 @@ if [ "$COMPILE" = true ]; then
         echo "$OPTION: $duration" >> "../../$RESULTS_FILE"
         log "Result for '$OPTION' saved to $RESULTS_FILE"
 
-        # Summarize and save instruction stats
-        if [ "$COUNT_INSTRUCTIONS" = true ]; then
-            log "Summarizing instruction statistics for $OPTION"
-            instr_count=$(summarize_instr_stats.py)
-            log "Instrumented instructions: $instr_count"
-            echo "$OPTION: $instr_count" >> "../../$STATS_FILE"
-            log "Result for '$OPTION' saved to $STATS_FILE"
-        fi
-
         cd ../..
         log "----------------------------------------"
     done
@@ -578,6 +587,11 @@ if [ "$TESTS" = true ]; then
     fi
 
     cp -r "$SCRIPT_DIR/redis.conf" .
+    # 2 Oct: REDIS_IO_THREADS rewrites io-threads in this run's copy (the disjoint layout gives the server fewer CPUs than 20 threads);
+    # REDIS_SERVER_CPUS / REDIS_CLIENT_CPUS pin redis-server and redis-benchmark to disjoint sets. Unset = as before.
+    [ -n "${REDIS_IO_THREADS:-}" ] && sed -i "s/^io-threads [0-9]*$/io-threads $REDIS_IO_THREADS/" redis.conf
+    RD_SPIN=""; [ -n "${REDIS_SERVER_CPUS:-}" ] && RD_SPIN="taskset -c $REDIS_SERVER_CPUS"
+    echo "server_cpus=${REDIS_SERVER_CPUS:-inherited} client_cpus=${REDIS_CLIENT_CPUS:-inherited} $(grep "^io-threads " redis.conf)" | tee "$RESULTS_DIR/redis.layout"   # also to stdout = the cell's cmd.log
 
     # --- Benchmark Settings ---
     REQ_GENERAL=1000000
@@ -587,6 +601,8 @@ if [ "$TESTS" = true ]; then
     REQ_LRANGE500=5000
     REQ_LRANGE600=3000
     REQ_MSET=100000
+    # REDIS_REQ_DIV (30 Sep): divides every request count (the single-client counting variant uses 10: 100000 per general test); unset = unchanged.
+    if [ -n "${REDIS_REQ_DIV:-}" ]; then for v in REQ_GENERAL REQ_LPUSH REQ_LRANGE100 REQ_LRANGE300 REQ_LRANGE500 REQ_LRANGE600 REQ_MSET; do eval "$v=$(( $v / REDIS_REQ_DIV ))"; done; fi
 
     if [ "$TRACE_MODE" = true ]; then
         log "Reducing benchmark load for trace mode."
@@ -622,7 +638,7 @@ if [ "$TESTS" = true ]; then
             TRACE_PIPE_PID=$!
         else
             echo -n "$OPTION " >> "$RESULTS_DIR/memory.txt"
-            /usr/bin/time --verbose "$SERVER_BIN" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
+            /usr/bin/time --verbose $RD_SPIN "$SERVER_BIN" redis.conf 2>&1 | grep "Maximum resident set size" | awk '{print $6}' >> "$RESULTS_DIR/memory.txt" &
         fi
         
         sleep 5
@@ -630,26 +646,29 @@ if [ "$TESTS" = true ]; then
         # Paper-era: 'orig' got 10x the requests (REDIS_ORIG_MULT=10); performance sweeps use 1 (same N).
         [[ "$OPTION" = "orig" && "${REDIS_ORIG_MULT:-1}" = "10" ]] && L="0" || L=""
         
-        run "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" SADD        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" HSET        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}" || exit 1
-        run "$BENCH_RESULTS_FILE" LPUSH       "${REQ_LPUSH}${L}" || exit 1
+        # REDIS_TESTS (1 Oct): measure only the listed tests (the pre-registered Redis set). LPUSH still runs, unmeasured (to /dev/null),
+        # when it is not listed: LRANGE_* read the list it fills. Unset = every test, as before.
+        run_sel() { if [ -n "${REDIS_TESTS:-}" ] && [[ " $REDIS_TESTS " != *" $2 "* ]]; then [ "$2" = LPUSH ] || return 0; run /dev/null "$2" "$3"; return; fi; run "$@"; }
+        run_sel "$BENCH_RESULTS_FILE" PING_INLINE "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" PING_MBULK  "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" SET         "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" GET         "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" INCR        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" RPUSH       "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" LPOP        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" RPOP        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" SADD        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" HSET        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" SPOP        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" ZADD        "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" ZPOPMIN     "${REQ_GENERAL}${L}" || exit 1
+        run_sel "$BENCH_RESULTS_FILE" LPUSH       "${REQ_LPUSH}${L}" || exit 1
         if [ "$TRACE_MODE" = false ]; then
-          run "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}" || exit 1
-          run "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}" || exit 1
-          run "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}" || exit 1
-          run "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}" || exit 1
-          run "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}" || exit 1
+          run_sel "$BENCH_RESULTS_FILE" LRANGE_100  "${REQ_LRANGE100}${L}" || exit 1
+          run_sel "$BENCH_RESULTS_FILE" LRANGE_300  "${REQ_LRANGE300}${L}" || exit 1
+          run_sel "$BENCH_RESULTS_FILE" LRANGE_500  "${REQ_LRANGE500}${L}" || exit 1
+          run_sel "$BENCH_RESULTS_FILE" LRANGE_600  "${REQ_LRANGE600}${L}" || exit 1
+          run_sel "$BENCH_RESULTS_FILE" MSET        "${REQ_MSET}${L}" || exit 1
         fi
         
         stop_redis_servers || exit 1
@@ -668,7 +687,3 @@ fi
 
 log "Script finished successfully. All results are in $RESULTS_DIR"
 
-if [ "$TRACE_MODE" = true ] && [ -n "$LOCAL_TRACES_DIR" ]; then
-    cd "$LOCAL_TRACES_DIR" || exit 1
-    analyze_trace2_zst_in_current_dir.sh
-fi

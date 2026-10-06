@@ -3,13 +3,15 @@
 # Enable command echoing and exit on error for easier debugging
 set -ex
 
-# 1. Download and unpack SQLite
-# Check if the archive already exists to avoid re-downloading
-if [ ! -f "sqlite-src-3500200.zip" ]; then
-    wget https://sqlite.org/2025/sqlite-src-3500200.zip
-fi
-# Check if the source directory exists to avoid re-unpacking
+# 1. Fetch and unpack SQLite, THROUGH THE COMMON HELPER like the other four applications.
+# This script used to call wget directly and verify afterwards, which made SQLite the only application
+# outside fetch_archive.sh: no bounded retry, no shared error path, and a bare wget failure as the whole
+# diagnosis. On 2026-09-18 one transient "Unable to establish SSL connection" to sqlite.org spent 901 s
+# failing and killed a leg by taking out its BASELINE configuration, so no ratio was computable at all.
+# fetch_archive.sh fetches if absent and always verifies against the pinned sha256 before returning.
 if [ ! -d "sqlite-src-3500200" ]; then
+    FETCH="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/fetch_archive.sh"
+    "$FETCH" sqlite-src-3500200.zip || exit 1
     unzip sqlite-src-3500200.zip
 fi
 

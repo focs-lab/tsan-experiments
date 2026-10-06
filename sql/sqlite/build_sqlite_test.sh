@@ -44,7 +44,11 @@ fi
 
 # Determine compiler and flags
 FLAGS_COMMON_BASE_VAL="-g -O2 -fno-omit-frame-pointer"
-FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
+# TSAN_EXTRA_MLLVM: campaign-wide -mllvm additions tied to the COMPILER rather than to a configuration name.
+# Unset by default, so an unset environment reproduces every earlier build exactly. Used for
+# -tsan-ea-report-abandoned, which exists only in compilers carrying the EA compile-time series: baking it into
+# config_definitions.sh would kill every build on a compiler that lacks it, with "Unknown command line argument".
+FLAGS_TSAN_COMMON_VAL="-fsanitize=thread ${TSAN_EXTRA_MLLVM:-}"
 FINAL_CFLAGS=""
 TARGET_CC=""
 
@@ -112,7 +116,7 @@ if [ -f "$BUILD_SUBDIR/threadtest3" ] && [ ! -f "$BUILD_SUBDIR/build_info.txt" ]
     rm -rf "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
     mv "$BUILD_SUBDIR" "$OLD_DIR/test-${CONFIG_TYPE}${BUILD_TAG:-}.$OLD_STAMP"
 elif [ -f "$BUILD_SUBDIR/build_info.txt" ]; then
-    # A build of another compiler is archived by its stamp, never overwritten in place (CLAUDE.md); a build of
+    # A build of another compiler is archived by its stamp, never overwritten in place (lab rule); a build of
     # the same compiler is simply rebuilt.
     OLD_STAMP=$(build_stamp_of "$BUILD_SUBDIR"); CUR_STAMP=$(compiler_stamp_of "$TARGET_CC")
     if [ -n "$OLD_STAMP" ] && [ "$OLD_STAMP" != "$CUR_STAMP" ]; then
@@ -123,11 +127,19 @@ elif [ -f "$BUILD_SUBDIR/build_info.txt" ]; then
 fi
 mkdir -p "$BUILD_SUBDIR"
 
-# Compile the test
+# Compile the test.
+# -I build/ COMES FIRST AND IS NOT OPTIONAL. threadtest3.c includes <sqlite3.h> with angle brackets, so it
+# is found only through an -I path. The amalgamation writes sqlite3.h into build/ beside sqlite3.c, and
+# without that -I the compile falls through to whatever /usr/include holds: on this host that is the
+# distribution's sqlite3.h at 3.45.1, compiled against the 3.50.2 amalgamation we actually link, and in a
+# container with no libsqlite3-dev it is nothing at all and the build fails (rehearsal of 2026-09-17).
+# Putting build/ first also means the header and the implementation are the same SQLite version everywhere,
+# which is what the pinned archive in tools/source_archives.sha256 is supposed to guarantee.
 $TARGET_CC $FINAL_CFLAGS -DSQLITE_THREADSAFE=1 \
     ./threadtest3.c \
     build/sqlite3.c \
     "$SQLITE_SRC_DIR/src/test_multiplex.c" \
+    -I build/ \
     -I "$SQLITE_SRC_DIR/test/" \
     -I "$SQLITE_SRC_DIR/src/" \
     -ldl -lpthread -lm \

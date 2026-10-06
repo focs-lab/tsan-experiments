@@ -21,6 +21,9 @@ FFMPEG_TAR_FILENAME="FFmpeg-n4.3.9.tar.gz"
 
 
 # Unpack:
+# refuse to unpack an archive whose sha256 is not the pinned one (tools/source_archives.sha256)
+VERIFY="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/verify_archive.sh"
+"$VERIFY" "$FFMPEG_TAR_FILENAME" || exit 1
 tar -xzf "$FFMPEG_TAR_FILENAME"
 
 # Copy special dummy empty file to prevent some strange errors:

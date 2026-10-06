@@ -54,14 +54,18 @@ if [ -z "$CONFIG_TYPE" ]; then
 fi
 
 # Validate archive
-if [ ! -f "$MEMCACHED_ARCHIVE" ]; then
-    echo "Error: Memcached archive '$MEMCACHED_ARCHIVE' not found."
-    exit 1
-fi
+# Fetch when absent, then verify, exactly as redis/sqlite/mysql do. Erroring out and telling the
+# reader to find the file themselves is no use to an evaluator, and the artifact already promises
+# the harness fetches and checks. tools/fetch_archive.sh does both from the pinned list.
+"$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/fetch_archive.sh" "$MEMCACHED_ARCHIVE" || exit 1
 
 # Determine compiler and base flags
 FLAGS_COMMON_BASE_VAL="-g -O2"
-FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
+# TSAN_EXTRA_MLLVM: campaign-wide -mllvm additions tied to the COMPILER rather than to a configuration name.
+# Unset by default, so an unset environment reproduces every earlier build exactly. Used for
+# -tsan-ea-report-abandoned, which exists only in compilers carrying the EA compile-time series: baking it into
+# config_definitions.sh would kill every build on a compiler that lacks it, with "Unknown command line argument".
+FLAGS_TSAN_COMMON_VAL="-fsanitize=thread ${TSAN_EXTRA_MLLVM:-}"
 FINAL_CFLAGS=""
 TARGET_CC=""
 
@@ -139,7 +143,7 @@ echo "Target build directory: $BUILD_DIR_NAME"
 echo "Compiler: $TARGET_CC"
 echo "Final CFLAGS: $FINAL_CFLAGS"
 
-# Clean up.  A previous build without build_info.txt predates the rebuttal work (paper-era
+# Clean up.  A previous build without build_info.txt predates this work (paper-era
 # binary, compiler no longer available): archive it instead of deleting it.
 if [ -d "$BUILD_DIR_NAME" ]; then
   if [ ! -f "$BUILD_DIR_NAME/build_info.txt" ]; then
@@ -149,7 +153,7 @@ if [ -d "$BUILD_DIR_NAME" ]; then
     rm -rf "old-builds/$BUILD_DIR_NAME.$stamp"
     mv "$BUILD_DIR_NAME" "old-builds/$BUILD_DIR_NAME.$stamp"
   else
-    # Same compiler stamp: a rebuild, delete. Another stamp: archive (CLAUDE.md: never overwrite another hash's build).
+    # Same compiler stamp: a rebuild, delete. Another stamp: archive (lab rule: never overwrite another hash's build).
     old_stamp=$(build_stamp_of "$BUILD_DIR_NAME"); cur_stamp=$(compiler_stamp_of "$TARGET_CC")
     if [ -n "$old_stamp" ] && [ "$old_stamp" = "$cur_stamp" ]; then
       echo "Removing previous build of the same compiler ($old_stamp): $BUILD_DIR_NAME"; rm -rf "$BUILD_DIR_NAME"
@@ -163,6 +167,9 @@ fi
 mkdir -p "$BUILD_DIR_NAME"
 
 echo "Extracting $MEMCACHED_ARCHIVE into $BUILD_DIR_NAME..."
+# refuse to unpack an archive whose sha256 is not the pinned one (tools/source_archives.sha256)
+VERIFY="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/verify_archive.sh"
+"$VERIFY" "$MEMCACHED_ARCHIVE" || exit 1
 tar -xzf "$MEMCACHED_ARCHIVE" -C "$BUILD_DIR_NAME" --strip-components=1
 if [ $? -ne 0 ]; then
     echo "Error: Failed to extract $MEMCACHED_ARCHIVE."
@@ -185,7 +192,7 @@ if [[ "$USE_SUMMARIES" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "
     if [ -n "$SUMMARY_ID" ]; then
         # Sound interface (tsan-audit fafbebedb41e+): files are tagged, read from -tsan-summary-dir with the
         # matching -tsan-summary-id, never overwritten by a seeded compile; no tsan-logs/ copy needed.
-        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+        SUMMARY_FLAGS="-mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
         SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
         echo "Using whole-program summaries from $SUMMARIES_DIR/ (id $SUMMARY_ID)."
     else
@@ -194,12 +201,29 @@ if [[ "$USE_SUMMARIES" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "
         # Legacy interface (before fafbebedb41e): read from tsan-logs/ in CWD. Read-only: EscapeAnalysis rewrote
         # tsan-logs/ea_summary.txt from every TU it compiled, replacing the whole-program summary by the first TU's.
         chmod 444 "$BUILD_DIR_NAME"/tsan-logs/*_summary.txt
-        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+        SUMMARY_FLAGS="-mllvm -tsan-use-analysis-summaries"
         SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
         echo "Using whole-program summaries from $SUMMARIES_DIR/ (copied to $BUILD_DIR_NAME/tsan-logs/, read-only)."
     fi
 else
     echo "Building without whole-program summaries (USE_SUMMARIES=$USE_SUMMARIES)."
+fi
+# Summary flags reach only the memcached SERVER's compile lines (2 Oct 2026, a stated build-system condition of the
+# local-globals summaries, like the summary-id rule): testapp compiles six server sources (util.c, cache.c, ...) under
+# the same names, and with the summary flags those units would take the server's whole-program verdicts. So
+# -tsan-use-analysis-summaries / -tsan-summary-dir / -tsan-summary-id and -tsan-summary-local-globals leave the
+# configure-wide CFLAGS and are appended after configure to the Makefile's memcached_CPPFLAGS, which only the
+# memcached-*.o compile lines use. SUMMARY_FLAGS_SERVER_ONLY=0 restores the earlier all-targets behaviour.
+SUMMARY_FLAGS="${SUMMARY_FLAGS:-}"
+# -tsan-summary-mismatch-fatal is a summary flag too: without a summary id it aborts every compile, configure's test included (2 Oct 03:2x).
+for sf in -tsan-summary-local-globals -tsan-summary-mismatch-fatal; do
+    if [[ " $FINAL_CFLAGS " == *" -mllvm $sf "* ]]; then
+        FINAL_CFLAGS=$(echo " $FINAL_CFLAGS " | sed "s/ -mllvm $sf / /g" | xargs)
+        SUMMARY_FLAGS=$(echo "$SUMMARY_FLAGS -mllvm $sf" | xargs)
+    fi
+done
+if [ "${SUMMARY_FLAGS_SERVER_ONLY:-1}" != "1" ] && [ -n "$SUMMARY_FLAGS" ]; then
+    FINAL_CFLAGS="$FINAL_CFLAGS $SUMMARY_FLAGS"; SUMMARY_FLAGS=""
 fi
 
 cd "$BUILD_DIR_NAME"
@@ -232,6 +256,12 @@ if ! "./$CONFIG_SH_NAME"; then
     exit 1
 fi
 
+if [ -n "$SUMMARY_FLAGS" ]; then
+    grep -q '^memcached_CPPFLAGS = ' Makefile || { echo "Error: no memcached_CPPFLAGS line in the generated Makefile; cannot confine the summary flags to the server."; cd ..; exit 1; }
+    sed -i "s|^memcached_CPPFLAGS = \(.*\)$|memcached_CPPFLAGS = \1 $SUMMARY_FLAGS|" Makefile
+    echo "Summary flags confined to the server's compile lines: $(grep '^memcached_CPPFLAGS = ' Makefile)"
+fi
+
 echo "--- Building Memcached ($CONFIG_TYPE) ---"
 NUM_JOBS=${NPROC:-$(nproc)}
 echo "Using $NUM_JOBS jobs for make."
@@ -256,7 +286,7 @@ if [[ "$USE_SUMMARIES" == "1" && "$CONFIG_TYPE" != "orig" && "$CONFIG_TYPE" != "
         fi
     done
 fi
-write_build_info . "$TARGET_CC" "$FINAL_CFLAGS" "config: $CONFIG_TYPE" "$SUMMARY_NOTE"
+write_build_info . "$TARGET_CC" "$(echo "$FINAL_CFLAGS $SUMMARY_FLAGS" | xargs)" "config: $CONFIG_TYPE" "$SUMMARY_NOTE" "server-only flags (memcached_CPPFLAGS): ${SUMMARY_FLAGS:-none}"
 
 cd ..
 echo "--- Build for $CONFIG_TYPE completed successfully ---"

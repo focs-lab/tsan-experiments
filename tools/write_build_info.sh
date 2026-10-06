@@ -26,7 +26,7 @@ write_build_info() {
     echo "compiler_mtime: $(date -Iseconds -r "$ccpath" 2>/dev/null)"
     local root; root=$(dirname "$(dirname "$ccpath")")
     if [ -f "$root/TSAN_AUDIT_HASH" ]; then
-      # frozen per-hash copy (/extra/alexey/builds/<lane>-<hash>/): no git tree, the stamp files are the provenance
+      # frozen per-hash copy: no git tree, the stamp files are the provenance
       echo "compiler_tree: $root (frozen copy)"
       echo "compiler_head: $(head -1 "$root/TSAN_AUDIT_HASH" | grep -oE '[0-9a-f]{12,40}' | head -1)"
       [ -f "$root/CONSOLIDATED_HASH" ] && echo "compiler_consolidated: $(head -1 "$root/CONSOLIDATED_HASH")"

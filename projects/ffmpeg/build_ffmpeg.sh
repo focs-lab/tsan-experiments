@@ -40,14 +40,18 @@ if [ -z "$CONFIG_TYPE" ]; then
 fi
 
 # Validate archive
-if [ ! -f "$FFMPEG_ARCHIVE" ]; then
-    echo "Error: FFmpeg archive '$FFMPEG_ARCHIVE' not found."
-    exit 1
-fi
+# Fetch when absent, then verify, exactly as redis/sqlite/mysql do. Erroring out and telling the
+# reader to find the file themselves is no use to an evaluator, and the artifact already promises
+# the harness fetches and checks. tools/fetch_archive.sh does both from the pinned list.
+"$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/fetch_archive.sh" "$FFMPEG_ARCHIVE" || exit 1
 
 # Determine compiler and base flags
 FLAGS_COMMON_BASE_VAL="-g -O2"
-FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
+# TSAN_EXTRA_MLLVM: campaign-wide -mllvm additions tied to the COMPILER rather than to a configuration name.
+# Unset by default, so an unset environment reproduces every earlier build exactly. Used for
+# -tsan-ea-report-abandoned, which exists only in compilers carrying the EA compile-time series: baking it into
+# config_definitions.sh would kill every build on a compiler that lacks it, with "Unknown command line argument".
+FLAGS_TSAN_COMMON_VAL="-fsanitize=thread ${TSAN_EXTRA_MLLVM:-}"
 FINAL_CFLAGS=""
 TARGET_CC=""
 
@@ -59,7 +63,7 @@ if [[ "$CONFIG_TYPE" == "orig" ]]; then
     # Let's stick to your version's compiler logic for now, which means 'orig' also uses LLVM clang.
     # If you want 'orig' to use GCC, this section needs adjustment.
     # Same compiler as the TSan builds (tools/tsan_compiler.sh: hardened prototype in
-    # ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
+    # the prototype tree unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
     # honoured if it really is that tree).
     source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
     TARGET_CC="$TSAN_CC"
@@ -132,8 +136,17 @@ if [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
         for f in st lo ea; do
             [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || { echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty"; exit 1; }
         done
-        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
-        SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+        SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
+        if [ -n "$SUMMARY_ID" ]; then
+            # Sound interface (as build_sqlite_test.sh / redis.sh / build_memcached.sh): tagged files, read from
+            # -tsan-summary-dir with the matching -tsan-summary-id, never rewritten by a compile. gen_summaries.sh here.
+            SUMMARIES_ABS=$(cd "$SUMMARIES_DIR" && pwd)
+            FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+            SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
+        else   # legacy: untagged paper-era files, copied read-only into the build dir's tsan-logs/ below
+            FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+            SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+        fi
     fi
 fi
 
@@ -172,6 +185,9 @@ mkdir -p "$RESULT_DIR_NAME"
 mkdir -p "$BUILD_DIR_NAME"
 
 echo "Extracting $FFMPEG_ARCHIVE into $BUILD_DIR_NAME..."
+# refuse to unpack an archive whose sha256 is not the pinned one (tools/source_archives.sha256)
+VERIFY="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)/../../tools/verify_archive.sh"
+"$VERIFY" "$FFMPEG_ARCHIVE" || exit 1
 tar -xzf "$FFMPEG_ARCHIVE" -C "$BUILD_DIR_NAME" --strip-components=1
 if [ $? -ne 0 ]; then
     echo "Error: Failed to extract $FFMPEG_ARCHIVE."
@@ -184,7 +200,7 @@ fi
 ORIGPWD="$(pwd)"
 source "$ORIGPWD/../../tools/write_build_info.sh"
 
-if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ] && [ -z "${SUMMARY_ID:-}" ]; then
     # Read-only: the EA pass rewrites ea_summary.txt per module otherwise (the failed open is
     # non-fatal, so the whole-program file survives the build).
     mkdir -p "$BUILD_DIR_NAME/tsan-logs"
@@ -252,7 +268,7 @@ if [ -n "$BUILD_ERRORCODE" ]; then
     exit $BUILD_ERRORCODE
 fi
 
-if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
+if [ "$USE_SUMMARIES" = 1 ] && [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ] && [ -z "${SUMMARY_ID:-}" ]; then
     for f in st lo ea; do
         cmp -s "$SUMMARIES_DIR/${f}_summary.txt" "tsan-logs/${f}_summary.txt" || {
             echo "Error: tsan-logs/${f}_summary.txt was modified during the build of $CONFIG_TYPE"; cd "$ORIGPWD"; exit 1; }

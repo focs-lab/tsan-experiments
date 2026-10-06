@@ -48,7 +48,11 @@ fi
 
 # Determine compiler and base flags
 FLAGS_COMMON_BASE_VAL="-g -O2"
-FLAGS_TSAN_COMMON_VAL="-fsanitize=thread"
+# TSAN_EXTRA_MLLVM: campaign-wide -mllvm additions tied to the COMPILER rather than to a configuration name.
+# Unset by default, so an unset environment reproduces every earlier build exactly. Used for
+# -tsan-ea-report-abandoned, which exists only in compilers carrying the EA compile-time series: baking it into
+# config_definitions.sh would kill every build on a compiler that lacks it, with "Unknown command line argument".
+FLAGS_TSAN_COMMON_VAL="-fsanitize=thread ${TSAN_EXTRA_MLLVM:-}"
 FINAL_CFLAGS=""
 TARGET_CC=""
 
@@ -60,7 +64,7 @@ if [[ "$CONFIG_TYPE" == "orig" ]]; then
     # Let's stick to your version's compiler logic for now, which means 'orig' also uses LLVM clang.
     # If you want 'orig' to use GCC, this section needs adjustment.
     # Same compiler as the TSan builds (tools/tsan_compiler.sh: hardened prototype in
-    # ~/dev/llvm-project-focs-lab unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
+    # the prototype tree unless LLVM_TSAN_ROOT is set; $LLVM_ROOT_PATH is only
     # honoured if it really is that tree).
     source "$(dirname "$0")/../../tools/tsan_compiler.sh" || exit 1
     TARGET_CC="$TSAN_CC"
@@ -136,8 +140,17 @@ if [ "$IS_TSAN_BUILD" = true ] && [ "$CONFIG_TYPE" != "tsan" ]; then
         for f in st lo ea; do
             [ -s "$SUMMARIES_DIR/${f}_summary.txt" ] || { echo "Error: USE_SUMMARIES=1 but $SUMMARIES_DIR/${f}_summary.txt is missing or empty"; exit 1; }
         done
-        FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
-        SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+        SUMMARY_ID=$(sed -n 's/^# tsan-summary-id: *//p' "$SUMMARIES_DIR/st_summary.txt" | head -1)
+        if [ -n "$SUMMARY_ID" ]; then
+            # Sound interface (29 Sep, as build_ffmpeg.sh): tagged files, read from -tsan-summary-dir with the matching
+            # -tsan-summary-id. Without an id the compiler reads nothing, so a -wp arm silently got per-unit verdicts.
+            SUMMARIES_ABS=$(cd "$SUMMARIES_DIR" && pwd)
+            FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries -mllvm -tsan-summary-dir=$SUMMARIES_ABS -mllvm -tsan-summary-id=$SUMMARY_ID"
+            SUMMARY_NOTE="summaries: $SUMMARIES_DIR id=$SUMMARY_ID ($(md5sum "$SUMMARIES_DIR"/{st,lo,ea}_summary.txt | awk '{print $1}' | cut -c1-8 | tr '\n' ' '))"
+        else   # legacy: untagged files, copied read-only into the build dir's tsan-logs/ below
+            FINAL_CFLAGS="$FINAL_CFLAGS -mllvm -tsan-use-analysis-summaries"
+            SUMMARY_NOTE="summaries: $SUMMARIES_DIR ($(for f in st lo ea; do printf '%s %s ' $f "$(md5sum "$SUMMARIES_DIR/${f}_summary.txt" | cut -c1-8)"; done))"
+        fi
     fi
 fi
 source "$(dirname "$0")/../../tools/write_build_info.sh"
@@ -228,7 +241,7 @@ mv $TMPFILE "$PROJECT_SRC_DIR/CMakeLists.txt"
 #cd "$PROJECT_SRC_DIR"
 
 
-echo "--- Configuring MySQL ($CONFIG_TYPE) ---"
+echo "--- Configuring MySQL ($CONFIG_TYPE, build type ${MYSQL_BUILD_TYPE:-Debug}) ---"  # MYSQL_BUILD_TYPE (29 Sep): Debug unless set (release baseline)
 
 #[ -z "$LLVM_ROOT_PATH" ] && echo "No \$LLVM_ROOT_PATH!" && exit 4
 
@@ -243,13 +256,15 @@ cmake -S "$PROJECT_SRC_DIR" -B "$BUILD_DIR_NAME" \
       -DCMAKE_INSTALL_PREFIX="$RESULT_DIR_NAME" \
       -DCMAKE_C_COMPILER="$TARGET_CC" \
       -DCMAKE_CXX_COMPILER="$TARGET_CXX" \
-      -DCMAKE_BUILD_TYPE=Debug \
+      -DCMAKE_BUILD_TYPE="${MYSQL_BUILD_TYPE:-Debug}" \
       -DCMAKE_C_FLAGS="$FINAL_CFLAGS" \
       -DCMAKE_CXX_FLAGS="$FINAL_CFLAGS" \
       -DDOWNLOAD_BOOST=1 \
       -DWITH_BOOST=downloads \
       -DWITH_LIBEVENT=bundled \
       -DWITH_UNIT_TESTS=OFF \
+      -DCMAKE_EXPORT_COMPILE_COMMANDS=ON \
+      ${MYSQL_EXTRA_CMAKE:-} \
       -DINSTALL_MYSQLTESTDIR= \
       $CMAKE_TSAN_OPTION \
       -DCMAKE_PREFIX_PATH="$PROJECT_SRC_DIR/downloads/usr" \
@@ -312,8 +327,9 @@ fi
 
 
 # A resumed build keeps its tree (the caller asked for incremental builds); otherwise the scratch tree goes.
-if [ "${RESUMING:-0}" = 1 ]; then
-	echo "Keeping $BUILD_DIR_NAME (RESUME_BUILD=1)"
+# KEEP_BUILD_DIR=1 keeps it too: the compile smoke (tools/smoke) needs a configured tree with its generated headers.
+if [ "${RESUMING:-0}" = 1 ] || [ "${KEEP_BUILD_DIR:-0}" = 1 ]; then
+	echo "Keeping $BUILD_DIR_NAME (RESUME_BUILD=1 or KEEP_BUILD_DIR=1)"
 else
 	[ -d "$BUILD_DIR_NAME" ] && rm -rf "$BUILD_DIR_NAME"
 fi

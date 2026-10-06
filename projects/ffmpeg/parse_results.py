@@ -5,7 +5,7 @@ Speedup = tsan_mean_time / config_mean_time  (>1 means faster than tsan).
 Baseline build: "ffmpeg-tsan"
 
 Usage:
-    python3 speedup_table.py [path/to/summary_ffmpeg_benchmark.csv]
+    python3 parse_results.py [path/to/summary_ffmpeg_benchmark.csv]
 """
 
 import csv

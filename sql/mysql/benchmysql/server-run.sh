@@ -9,8 +9,11 @@ LAUNCH_COMMAND_PID=
 # Base command
 declare -a mysql_cmd=(
     "$MYSQL_DIR/mysqld"
+    ${MYSQL_RUN_AS_ROOT:+"$MYSQL_RUN_AS_ROOT"}
     "--datadir=$MYSQL_DATA_DIR"
 )
+# 2 Oct: MYSQL_SERVER_CPUS pins mysqld alone (disjoint from sysbench; Intel re-check). taskset execs mysqld, so its pid is unchanged. Unset = as before.
+[ -n "${MYSQL_SERVER_CPUS:-}" ] && mysql_cmd=(taskset -c "$MYSQL_SERVER_CPUS" "${mysql_cmd[@]}")
 
 # VTune run:
 if [ "$BENCH_USE_VTUNE" = "true" ]; then

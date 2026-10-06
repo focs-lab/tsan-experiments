@@ -99,11 +99,26 @@ CMD="$EXECUTABLE_PATH"
 
 if [ -n "$NTHREADS" ]; then
     #    CMD="$CMD --w1-threads $NTHREADS --w3-threads $NTHREADS walthread1 walthread3"
-    CMD="$CMD --w1-threads $NTHREADS walthread1"
+    # SQLITE_TESTS selects which subtests run alongside the thread count. The default keeps the contention
+    # sweeps' behaviour exactly (walthread1 alone, which is all the 13-18 September sweep measured); the
+    # campaign sets SQLITE_TESTS='*' to get the whole suite at a chosen walthread1 thread count.
+    #
+    # '*' rather than an explicit seven-name list because that is precisely what threadtest3 does for itself
+    # when given no arguments at all: threadtest3.c:1522 defines `substArgv[] = { 0, "*", 0 }` and
+    # substitutes it when argc < 2. So '*' reproduces the default test selection instead of re-stating it,
+    # and cannot drift from it if the suite gains a test. Note that a bare `--w1-threads N` with no test
+    # argument does NOT run everything: argc is then 3, substArgv is not substituted, and the selection loop
+    # globs the number itself against the test names, matches nothing, and exits with the usage message.
+    CMD="$CMD --w1-threads $NTHREADS ${SQLITE_TESTS:-walthread1}"
     RESULTS_DIR=${RESULTS_DIR}/contention
     mkdir -p "$RESULTS_DIR"
     RESULT_FILE="$RESULTS_DIR/${CONFIG_TYPE}_${NTHREADS}threads.log"
 else
+    # SQLITE_TESTS without a thread count selects subtests for the ordinary run (unset: threadtest3's own default,
+    # the whole suite). Used from 25 Sep 2026 to run only the seven subtests the speedup readout uses
+    # (walthread1 walthread2 dynamic_triggers checkpoint_starvation_1 checkpoint_starvation_2 stress1 stress2),
+    # about half the time per run; the log's "Running <name>" lines record which subtests ran.
+    [ -n "${SQLITE_TESTS:-}" ] && CMD="$CMD $SQLITE_TESTS"
     RESULT_FILE="$RESULTS_DIR/${CONFIG_TYPE}.log"
 fi
 
@@ -154,6 +169,18 @@ echo "Running, please wait..."
 # -f formats the output. %M gives the maximum resident set size in Kilobytes.
 # We use a tab character for formatting.
 TIME_CMD="/usr/bin/time -a -o $MEMORY_RESULTS_FILE -f '$CONFIG_TYPE\t%M'"
+
+# SQLITE_DB_DIR (4 Oct 2026): run threadtest3 from a fresh directory under this path (e.g. /dev/shm, a tmpfs), so its
+# test.db files live there instead of in this directory on disk. The result and memory files stay here. Unset: unchanged.
+if [ -n "${SQLITE_DB_DIR:-}" ]; then
+    RESULT_FILE="$(realpath -m "$RESULT_FILE")"; MEMORY_RESULTS_FILE="$(realpath -m "$MEMORY_RESULTS_FILE")"
+    CMD="${CMD/$EXECUTABLE_PATH/$(realpath "$EXECUTABLE_PATH")}"
+    TIME_CMD="/usr/bin/time -a -o $MEMORY_RESULTS_FILE -f '$CONFIG_TYPE\t%M'"
+    DB_RUN_DIR="$(mktemp -d "$SQLITE_DB_DIR/sqlite-run.XXXXXX")" || { echo "cannot create a run directory in $SQLITE_DB_DIR"; exit 1; }
+    trap 'rm -rf "$DB_RUN_DIR"' EXIT
+    cd "$DB_RUN_DIR" || exit 1
+    echo "Databases in: $DB_RUN_DIR"
+fi
 
 CMD_STATUS=0
 if [ "$USE_TRACE" = true ]; then

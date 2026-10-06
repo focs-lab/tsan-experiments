@@ -3,7 +3,11 @@
 set -e
 
 # --- Configuration ---
-FF_TEST_VIDEO="./input/WatchingEyeTexture.mkv"
+# Tears of Steel (CC-BY 3.0, Blender Foundation), a 100-second cut matched to the retired clip's shape:
+# 1366x768, 30 fps, yuv420p, ~6.5 Mbit/s, vorbis 48 kHz stereo. Provenance and the exact producing command are
+# in input/PROVENANCE.md. The predecessor, WatchingEyeTexture.mkv, cannot be redistributed, so no FFmpeg number
+# measured on it is comparable with one measured on this — see the note in that file.
+FF_TEST_VIDEO="${FF_TEST_VIDEO:-./input/TearsOfSteel-1366x768-100s.mkv}"
 [ ! -f "$FF_TEST_VIDEO" ] && echo "No video file found at $FF_TEST_VIDEO" && exit 1
 
 # FF_BUILD_LIST (env) restricts the builds, e.g. FF_BUILD_LIST="ffmpeg-tsan ffmpeg-tsan-sound".
@@ -73,6 +77,10 @@ CODECS[h264_libx264]="-c:v libx264 -preset medium -crf 23 ::mp4"
 CODECS[h265_libx265]="-c:v libx265 -preset medium -crf 28 -tag:v hvc1 ::mp4"
 CODECS[mjpeg]="-c:v mjpeg -pix_fmt yuvj420p -q:v 2 ::avi"
 CODECS[copy_passthrough]="-c:v copy -c:a copy ::mkv"
+# Opt-in extras (27 Sep): FF_COPY_LONG_LOOPS=N adds copy_long = copy_passthrough with -stream_loop N on the input (a multi-second run, so
+# start-up and the 10-ms timer do not dominate); FF_ONLY_CODECS="k1 k2" runs only those keys. Unset, the four artifact workloads run exactly as before.
+if [ -n "${FF_COPY_LONG_LOOPS:-}" ]; then CODECS[copy_long]="-c:v copy -c:a copy ::mkv"; fi
+if [ -n "${FF_ONLY_CODECS:-}" ]; then for k in "${!CODECS[@]}"; do [[ " $FF_ONLY_CODECS " == *" $k "* ]] || unset "CODECS[$k]"; done; fi
 
 # --- FFmpeg Benchmark Start ---
 echo "--- FFmpeg Benchmark Start (using /usr/bin/time) ---"
@@ -106,7 +114,8 @@ for CODEC_KEY in "${!CODECS[@]}"; do
 		MEM_USAGES=()
 
 		export LD_LIBRARY_PATH="$BUILD/lib/:$LD_LIBRARY_PATH"
-		CMD_TEMPLATE="$BUILD/bin/ffmpeg -hide_banner -i \"$FF_TEST_VIDEO\" -threads $FFMPEG_BENCH_NPROC_COUNT -y $ENCODING_PARAMS -loglevel error /dev/shm/out.$OUTPUT_EXT"
+		INPUT_OPTS=""; [ "$CODEC_KEY" = copy_long ] && INPUT_OPTS="-stream_loop $FF_COPY_LONG_LOOPS"
+		CMD_TEMPLATE="$BUILD/bin/ffmpeg -hide_banner $INPUT_OPTS -i \"$FF_TEST_VIDEO\" -threads $FFMPEG_BENCH_NPROC_COUNT -y $ENCODING_PARAMS -loglevel error /dev/shm/out.$OUTPUT_EXT"
 
 		if [ "$USE_VTUNE" = true ]; then
 			VTUNE_RESULT_DIR="vtune_results/${BUILD}_${CODEC_KEY}"

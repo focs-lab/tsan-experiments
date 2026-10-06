@@ -38,9 +38,11 @@ def parse_log_file(filepath):
 
             # --- Rules for extracting metrics for each test ---
 
-            # walthread1: 345 iterations
+            # walthread1: 345 iterations. create_drop_index_1 and shared1 print the same per-thread counter under the
+            # 60 s threadtest3 patch (tt3-counters-60s.patch); until 3 Oct 2026 they were not read here and every record-set
+            # composite was stress2 alone (zero-valued tests are dropped below, silently).
             m = re.search(r'says: (\d+) iterations', line)
-            if m and current_test == 'walthread1':
+            if m and current_test in ('walthread1', 'create_drop_index_1', 'shared1'):
                 results[current_test] += int(m.group(1))
                 continue
 
