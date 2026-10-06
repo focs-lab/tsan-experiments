@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-count_tsan_instrumentation.py - Count __tsan_* instrumentation calls in a binary.
+static_count_tsan_instrumentation.py - Count __tsan_* instrumentation calls in a binary.
 
 Usage:
-    python3 count_tsan_instrumentation.py <binary> [--nm NM_PATH] [--objdump OBJDUMP_PATH]
-    python3 count_tsan_instrumentation.py <binary> --verbose
-    python3 count_tsan_instrumentation.py <binary> --summary
+    python3 static_count_tsan_instrumentation.py <binary> [--nm NM_PATH] [--objdump OBJDUMP_PATH]
+    python3 static_count_tsan_instrumentation.py <binary> --verbose
+    python3 static_count_tsan_instrumentation.py <binary> --summary
 
 This script uses `nm` to list symbols and `objdump` (or `llvm-objdump`) to
 disassemble the binary, then counts call-site references to each __tsan_* function.
@@ -63,9 +63,16 @@ def run(cmd: list[str]) -> str:
         result = subprocess.run(
             cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
-        if result.returncode != 0 and not result.stdout:
-            print(f"Warning: {cmd[0]} exited {result.returncode}: {result.stderr.strip()}",
-                  file=sys.stderr)
+        if result.returncode != 0:
+            # A TOOL FAILURE IS NOT AN EMPTY RESULT. This warned and returned the empty stdout, so a
+            # missing binary, a wrong --objdump, a wrong-architecture or corrupt file and a genuine zero
+            # all produced the same silent success -- and these counts are the paper's static-reduction
+            # table. Exit non-zero and name the command that failed. (Audit, 2026-09-19.)
+            print(f"Error: {' '.join(cmd[:2])} exited {result.returncode} on this binary.", file=sys.stderr)
+            if result.stderr.strip():
+                print(f"  {result.stderr.strip().splitlines()[0]}", file=sys.stderr)
+            print("  Counting cannot continue; no count is printed rather than a zero.", file=sys.stderr)
+            sys.exit(2)
         return result.stdout
     except FileNotFoundError:
         print(f"Error: '{cmd[0]}' not found. Install binutils or llvm-binutils.", file=sys.stderr)
@@ -182,8 +189,14 @@ def main() -> None:
         counts = count_calls_objdump(args.binary, tsan_names, args.objdump)
 
     if not counts:
-        print("[!] No __tsan_* call sites found.  "
-              "Is the binary compiled with -fsanitize=thread?", file=sys.stderr)
+        # A GENUINE ZERO IS A RESULT AND IS PRINTED AS ONE. Reaching here means the tools ran and exited
+        # zero (run() now refuses otherwise), so this is an uninstrumented binary -- which `orig` is, by
+        # construction, for every application. Printing nothing made a real measurement look like a
+        # failure and a failure look like a real measurement.
+        print("[*] Toolchain ran cleanly and found no __tsan_* call sites: this binary is uninstrumented.",
+              file=sys.stderr)
+        print(0 if args.summary else "\n  Category totals:\n  " + "-" * 54 + "\n  (none)\n"
+              "  " + "-" * 54 + "\n  TOTAL __tsan_* call sites                        0")
         sys.exit(0)
 
     # 3. Aggregate by category

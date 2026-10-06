@@ -2,16 +2,33 @@
 # lib.sh — shared helpers of the P5 driver (sourced).
 P5_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 P5_DIR="$P5_ROOT/tools/perf"
-P5_BUILDS=/extra/alexey/builds
-P5_INSTALL_ROOT=/extra/alexey/tsan-experiments/installs      # MySQL / FFmpeg prefixes (HDD)
-P5_SCRATCH="$P5_ROOT/.scratch"                                # compile trees (SSD)
+# Lab defaults, every one overridable: these are paths and CPU numbers of ONE machine, and the artifact
+# runs on somebody else's. Hardcoding them made three separate "works in the lab, not outside it" failures
+# in a day, each of which a container run found and no amount of reading found.
+P5_BUILDS="${P5_BUILDS:-/extra/$USER/builds}"
+P5_INSTALL_ROOT="${P5_INSTALL_ROOT:-/extra/$USER/tsan-experiments/installs}"   # MySQL / FFmpeg prefixes (HDD)
+P5_SCRATCH="${P5_SCRATCH:-$P5_ROOT/.scratch}"                # compile trees (SSD)
 P5_LOCK="${P5_LOCK:-/tmp/p5-bench.lock}"                     # one benchmark at a time; builds hold it shared
-P5_CPUSET_DEFAULT="4-27,60-83"                                # 24 cores + SMT siblings, out of the bench pool
+# NOTE THE MISSING COLON. `${VAR-default}` leaves an explicitly EMPTY value empty, where `${VAR:-default}`
+# would replace it with the lab's CPU numbers. Empty means "do not pin", which is what an evaluator who has
+# not set ART_CPUSET must get — an invalid mask like `taskset -c 4-27,60-83` on a container limited to CPUs
+# 40-47 fails the build in 0 s with "Invalid argument", which is how this was found.
+P5_CPUSET_DEFAULT="${P5_CPUSET_DEFAULT-4-27,60-83}"          # 24 cores + SMT siblings, out of the bench pool
+# p5_taskset: the pinning prefix, or nothing when no cpuset is set. Use this rather than writing `taskset`
+# with a literal mask anywhere — a literal is correct on exactly one machine.
+p5_taskset() { [ -n "${P5_CPUSET_DEFAULT:-}" ] && echo "taskset -c $P5_CPUSET_DEFAULT" || true; }
 p5_log() { echo "[$(date '+%F %T')] $*"; }
 p5_die() { p5_log "ERROR: $*" >&2; exit 1; }
 # verify_compiler <hash>: prints the frozen root; dies if the stamp does not match
-p5_compiler_root() {  # <hash> -> /extra/alexey/builds/<lane>-<hash>; any lane prefix (tsan-dev-, tsan-audit-, tsan-perf-, tsan-yield-)
+p5_compiler_root() {  # <hash> -> $P5_BUILDS/<prefix>-<hash>; any prefix (tsan-dev-, tsan-audit-, tsan-perf-, tsan-yield-)
   local hash=$1 root
+  # An explicit LLVM_TSAN_ROOT from the caller wins, provided it stamps the hash asked for. Two copies can
+  # share a hash — tsan-merge-<h> and tsan-merge-<h>-astats differ only by the counters option — and the glob
+  # below silently picks the alphabetically first, which cost four counter cells that ran counter-free.
+  if [ -n "${LLVM_TSAN_ROOT:-}" ] && [ -x "$LLVM_TSAN_ROOT/bin/clang" ]; then
+    if grep -q "$hash" "$LLVM_TSAN_ROOT/TSAN_AUDIT_HASH" 2>/dev/null; then echo "$LLVM_TSAN_ROOT"; return 0; fi
+    p5_die "LLVM_TSAN_ROOT=$LLVM_TSAN_ROOT does not stamp $hash"
+  fi
   local cands; cands=$(ls -d "$P5_BUILDS"/*-"$hash" 2>/dev/null | grep -vE -- "-evictstats$" )   # the counters-ON twin is for tools/eviction-counters, never for perf
   root=$(echo "$cands" | head -1)
   [ -n "$root" ] && [ -x "$root/bin/clang" ] || p5_die "no frozen copy for $hash under $P5_BUILDS (expected <lane>-$hash/ with bin/clang)"
@@ -22,7 +39,10 @@ p5_compiler_root() {  # <hash> -> /extra/alexey/builds/<lane>-<hash>; any lane p
 p5_sha256() { sha256sum "$1" | cut -c1-64; }
 p5_stamp_of_dir() { grep -m1 "^compiler_version:" "$1/build_info.txt" 2>/dev/null | grep -oE '[0-9a-f]{40}' | cut -c1-12; }
 # foreign bench reservations (other users' or ours)
-p5_bench_active() { systemctl list-units 'bench-*' --no-legend 2>/dev/null | grep -q .; }
+# A reservation is a bench-* SERVICE or SCOPE. An empty bench-<user>.slice can outlive its last reservation and
+# stay 'active'; matching it made every build wait five minutes at a time, forever, holding the machine
+# job lock while it waited (24 Sep 2026).
+p5_bench_active() { systemctl list-units 'bench-*' --type=service,scope --no-legend 2>/dev/null | grep -q .; }
 # CPU accounting: total busy jiffies of the whole machine vs the jiffies our cpuset could have used
 p5_cpu_snapshot() { awk '/^cpu /{print $2+$3+$4+$6+$7+$8, $5}' /proc/stat; }   # busy idle
 p5_loadavg() { cut -d' ' -f1-3 /proc/loadavg; }
@@ -31,7 +51,7 @@ p5_turbo() { cat /sys/devices/system/cpu/intel_pstate/no_turbo 2>/dev/null; }
 # Clock regime (lab benchmarking guide): with no bench session the node is in power saving mode, 0.8-4.3 GHz,
 # variable with load; with a bench session active it runs at a fixed 1.9 GHz with idle states disabled. The
 # regime is recorded per run so runs from the two regimes are never mixed in one table.
-p5_bench_session() { systemctl list-units 'bench-*' --no-legend 2>/dev/null | grep -q . && echo 1 || echo 0; }
+p5_bench_session() { p5_bench_active && echo 1 || echo 0; }
 p5_regime() { [ "$(p5_bench_session)" = 1 ] && echo "bench-fixed" || echo "powersave-variable"; }
 p5_cpu_mhz() { local c=${1:-4}; awk '{printf "%.0f", $1/1000}' "/sys/devices/system/cpu/cpu$c/cpufreq/scaling_cur_freq" 2>/dev/null || echo 0; }
 # app -> dir of the app's scripts, binary path for a config, "kind"

@@ -6,7 +6,9 @@ set -euo pipefail
 cd "$(dirname "$0")"
 BIN="${1:-bin}"; R="${2:-1000}"; SEED="${SEED:-20260902}"; NMAX="${NMAX:-1023}"; JOBS="${JOBS:-32}"
 HASH=$(head -1 "$BIN/build_info.txt" | grep -oE '\b[0-9a-f]{40}\b' | head -1 | cut -c1-12 || true)
-OUT="results/$(date +%F)-${HASH:-unknown}"; mkdir -p "$OUT"
+# EVS_OUT lets a caller outside this tree (the artifact's 50-eviction-stress.sh) place the results where it
+# collects everything else; unset, the lab layout is unchanged.
+OUT="${EVS_OUT:-results/$(date +%F)-${HASH:-unknown}}"; mkdir -p "$OUT"
 CFGS=$(ls "$BIN" | grep -E '^evict_stress\.[^.]+$' | sed 's/^evict_stress\.//' | sort)
 export TSAN_OPTIONS="exitcode=0 report_bugs=1"
 

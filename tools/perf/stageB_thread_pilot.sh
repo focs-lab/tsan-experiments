@@ -1,5 +1,5 @@
 #!/bin/bash
-# stageB_thread_pilot.sh <hash> — which thread policy yields the larger speedups? (Alexey: "try those which give
+# stageB_thread_pilot.sh <hash> — which thread policy yields the larger speedups? (request of 2026-09-07: "try those which give
 # better performance"). memcached: server -t 48 (pinned-CPU rule) vs -t 112 (the paper's nproc rule); MySQL:
 # sysbench 36 threads (¾ of 48) vs 84 (¾ of 112). Stock and sound only, N=3, 60 s sysbench, own results tree
 # per policy so the sweep's tree stays clean. Output: thread_pilot.md with the sound/stock ratio per policy.

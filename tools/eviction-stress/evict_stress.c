@@ -1,5 +1,5 @@
 // evict_stress.c -- P4: does reduced instrumentation change race detection under
-// shadow-granule pressure?  (ATC'26 #571 rebuttal, plan/rebuttal-experiments.md, P4)
+// shadow-granule pressure?  
 //
 // TSan keeps kShadowCnt = 4 shadow cells per 8-byte granule.  When a store finds
 // no free cell and no cell of its own thread, it evicts

@@ -2,11 +2,11 @@
 
 ## Method (Stage A, methodology pass — for approval)
 
-- **Compiler**: the tsan-dev tip, frozen self-contained copy `/extra/alexey/builds/tsan-dev-<hash>/`
+- **Compiler**: the tsan-dev branch tip, frozen self-contained copy `/extra/$USER/builds/tsan-dev-<hash>/`
   (`clang --version` stamp = code; `TSAN_AUDIT_HASH`, `CONSOLIDATED_HASH`). Every binary's `build_info.txt`
   records the stamp, flags and summaries; `static-counts.csv` records its memory-access instrumentation sites.
 - **Configurations** (`configs.sh`): `orig` (native), `tsan` (stock TSan), `tsan-sound` (EA+LO+STC+SWMR),
-  `tsan-dom-ea-lo-st-swmr` (**AllOpt−peel**), `tsan-dom_peeling-ea-lo-st-swmr` (**AllOpt+peel**, the paper's AllOpt),
+  `tsan-dom-ea-lo-st-swmr` (**AllOpt−peel**), `tsan-dom_peeling-ea-lo-st-swmr` (**AllOpt+peel**; the paper does not say whether its AllOpt bar had peeling on, so CLAIMS.md compares the paper's bar with both),
   and `…-wp` = the same build with the sound whole-program summaries (memcached, Redis, SQLite). Per-unit
   analyses otherwise. Stage B adds the single analyses (`tsan-st`, `-stmt`, `-swmr`, `-lo`, `-ea`, `-dom`,
   `-dom_peeling`) and `tsan-sound-wp`.
@@ -28,7 +28,7 @@
   work nor somebody else's interference.
 - **Machine state during Stage A** (recorded in every `meta.json`): governor `powersave`, turbo enabled — the
   `bench` reservation, which pins the performance governor and disables turbo, is used only when another user
-  holds one (Alexey's policy), so the clock policy is the machine's default and identical for all configurations.
+  holds one (machine policy), so the clock policy is the machine's default and identical for all configurations.
   One single-threaded compile (the MySQL escape-analysis case under investigation,
   `tools/notes/ea-compile-time-2026-09-04.md`) was left running throughout, confined with `taskset` to CPUs
   52-55,108-111, outside both benchmark cpusets; it contributes < 1 % of the machine and shows up in the
@@ -43,13 +43,13 @@
   confirmed by `TSAN_OPTIONS=print_evictions=1` (3.0e8 evictions in a 10 s `checkpoint_starvation_1`). SU rows are
   unaffected to first order (both sides share the runtime; an optimised build evicts slightly less, so it pays
   slightly less — a few per cent of a few per cent, flattering). Stage B runs on the performance-branch copy
-  with the counters off (hash to be announced by tsan-dev), which will produce the absolute column properly.
+  with the counters off (hash to be announced), which will produce the absolute column properly.
 - **Provenance gate in the runner.** `bench_one.sh` refuses any binary whose `build_info.txt`
   `compiler_head` is not the sweep's hash (`P5_HASH`, exported by `run.sh`). Added after a one-off that skipped
   `build.sh` measured a 2026-09-02 pre-audit SQLite binary (0de7a7350375) as if it were 729521af8965 and
-  produced a spurious "DE+Peeling alone 1.48x"; caught by the tsan-dev lane from the binary's stamp, withdrawn,
+  produced a spurious "DE+Peeling alone 1.48x"; caught by the compiler lane from the binary's stamp, withdrawn,
   the row quarantined. Every one of the 28 Stage A rows was then audited from `meta.json`: all 729521af8965.
-- **Stage A's EA-containing rows carry a known soundness hole** (reported by tsan-dev, 2026-09-05): in the
+- **Stage A's EA-containing rows carry a known soundness hole** (reported 2026-09-05): in the
   escape summaries, a callee that stores its argument through another argument was reported non-escaping to
   callers, so a small number of accesses were elided that a sound analysis keeps. Every `tsan-sound` and AllOpt
   row on 729521af8965 contains EA and is therefore very slightly flattering to the optimised configurations —
@@ -75,7 +75,7 @@
   built on d3bf9f8c39fe (their sha256 and stamps remain in every run's `meta.json`, and any of them can be
   rebuilt from the frozen copy — the Redis sound one was, as `redis-sound-h729`, for a per-function diff).
   All five build scripts now archive a build of another stamp as `old-builds/<dir>.<stamp>` and delete only a
-  same-stamp rebuild, which is what CLAUDE.md required.
+  same-stamp rebuild, which is what the lab rule required.
 - **Untested in Stage A**: the bench-reservation path (`bench_session.sh`, tmux + `bench -c … -m …`). It is
   implemented and the driver switches to it when another user's `bench-*` unit is active, but exercising it
   confines every other session on the machine to 8 CPUs, so it was not run during Stage A. It needs one quiet
@@ -134,7 +134,7 @@ It is not foreign load (the slowest-throughput run had the *lowest* outside-CPU 
 for `tsan-sound`). The likely cause is the workload's own placement: 48 server threads and 10 client threads
 with 500 connections share the same 48 pinned CPUs, so a run settles into one equilibrium or the other. With a
 ~10 % CV and only ~2 % fewer instrumentation sites between `tsan` and `tsan-sound` (6748 → 6601), N = 3 medians
-cannot resolve memcached. Options, for Alexey to choose: raise N for memcached only (a run is ~90 s, N = 10 costs
+cannot resolve memcached. Options, open for decision: raise N for memcached only (a run is ~90 s, N = 10 costs
 15 minutes per configuration), give client and server disjoint CPU subsets (changes the paper's setup), or run
 the memcached rows under a `bench` reservation (performance governor, no turbo — but it confines every other
 session on the machine to 8 CPUs). The other four applications are single-process or long-running and do not
@@ -190,7 +190,7 @@ belongs in the method text, because at these effect sizes it matters more than t
 
 `chromium/run_all_chrome_bench.sh`, build `chrome-tsan` (729521af8965), suites `blink_perf.svg` and
 `speedometer3`, 2 repetitions, 48 pinned CPUs, private Xvfb; folded by
-`tools/chrome-result-processing/aggregate_reps.py` into `/extra/alexey/chromium/results-729521af8965/csv/`.
+`tools/chrome-result-processing/aggregate_reps.py` into `/extra/$USER/chromium/results-729521af8965/csv/`.
 
 | suite | rows (story x label) | rep-to-rep CV median | max | wall per rep |
 |---|---|---|---|---|
@@ -204,10 +204,10 @@ is the minimum, and per-story medians rather than a single score should be repor
 
 ### Stage B compiler acceptance (2026-09-05)
 
-Frozen copy `/extra/alexey/builds/tsan-perf-d3bf9f8c39fe/` (perf/stage-b: runtime counters off, hot symbols
+Frozen copy `/extra/$USER/builds/tsan-perf-d3bf9f8c39fe/` (perf/stage-b: runtime counters off, hot symbols
 byte-identical to upstream; EA fixpoint fix; lost-race shapes 18-21). All Stage A configurations of the five
 applications rebuilt with `build.sh` into `results/stageB-d3bf9f8c39fe/`; static-count diff against
-729521af8965 with `static_diff.py`, attributed line by line with tsan-dev, in
+729521af8965 with `static_diff.py`, attributed line by line, in
 `tools/notes/stageb-acceptance-2026-09-05.md`. Accepted on all five applications (2026-09-05 13:07): stock rows
 identical; EA rows +0.06 % (SQLite) to +1.65 % (MySQL), every increase attributed to the soundness shapes
 (19: address of a local passed to a bodiless or `linkonce_odr` pointer-returning callee; recovered by the
@@ -216,7 +216,7 @@ compiles in ~20.5 min (3 h 02 min on 729521af8965). Chromium is *not* accepted o
 `vk_safe_struct_utils.cpp` is a second compile-time cliff, fixed in the next copy; every EA-containing
 Chromium row waits for it. No benchmark has run on this copy yet.
 
-### Stage B decisions (Alexey, 2026-09-05: "measure what performs best"; operational points mine)
+### Stage B decisions (decided 2026-09-05: "measure what performs best"; operational points mine)
 
 1. **Thread/CPU policy.** Every workload keeps the *paper's derivation rule* applied to the pinned machine:
    fixed values stay fixed (FFmpeg `-threads 4`), values the paper derived from `nproc` are derived from the
@@ -261,8 +261,8 @@ Chromium row waits for it. No benchmark has run on this copy yet.
 ### Stage B, memcached leg complete (2026-09-08, tsan-perf-d3bf9f8c39fe)
 
 16 configurations, N = 5, 100 000 requests per client, 24 server threads (physical cores), run-major, one
-measurement at a time under the machine job lock; powersave-variable clock (no bench reservation, per Alexey's
-standing instruction), recorded per run. Native is **2.935x** stock TSan [2.674, 3.328].
+measurement at a time under the machine job lock; powersave-variable clock (no bench reservation, per the standing
+machine policy), recorded per run. Native is **2.935x** stock TSan [2.674, 3.328].
 
 Every instrumented configuration sits within ~4 % of stock TSan and every interval straddles 1.0: DE 1.038,
 AllOpt-peel 1.036, STC 1.030, SWMR 1.029, sound+names 1.029, AllOpt+peel WP 1.015, sound WP 1.016, DynSTC 1.011,

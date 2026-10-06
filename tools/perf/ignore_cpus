@@ -1,1 +1,8 @@
-52-55,108-111
+# Processors excluded from BOTH sides of the disturbance accounting: neither ours nor foreign.
+# Empty by default, and it should stay empty unless you know why you are changing it -- anything listed
+# here is a part of the machine the gate stops watching, silently, for every run on this checkout.
+#
+# Use it only for processors deliberately given to your own long-running background work, so that work is
+# not counted as other people's load. Example, the reserved set on the lab host this campaign ran on:
+#   52-55,108-111
+# P5_IGNORE_CPUS overrides this file.

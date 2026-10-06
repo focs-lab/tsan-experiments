@@ -1,0 +1,28 @@
+# Pinned sha256 AND origin URL for every third-party archive the harness unpacks.
+# Format: <sha256>  <basename>  <url>   — the URL lives beside the hash so a fetch and its
+# verification cannot disagree about which file they mean. ONE source of truth: the artifact's
+# third-party/SOURCES.md quotes these same values, and `verify_archive.sh` is what enforces them.
+#
+# A mismatch is a STOP, not a warning: an upstream file that moved or changed silently changes what is
+# built, and every number in this repository is attributed to a specific source tree. Unknown archives are
+# also refused — failing closed on a file nobody pinned is the point.
+#
+# Provenance of each pin, because they are not all equally strong:
+#
+#   memcached, redis, ffmpeg, mysql  verified against the archives the 15-17 September 2026 campaign built
+#                                    from, on the machine that built it.
+#   memtier                          verified BOTH ways: the archive on this machine and a fresh fetch of
+#                                    the GitHub tag are byte-identical. Its local name is 2.1.1.tar.gz —
+#                                    GitHub's tag download renamed — and the pinned name here is the
+#                                    descriptive one the fetcher uses.
+#   sqlite                           THE WEAK ONE. download_and_compile_sqlite.sh deletes the zip after
+#                                    unpacking, so only the tree survives from the campaign and this hash
+#                                    is from a fresh download of the same versioned URL. Almost certainly
+#                                    the same file; we cannot demonstrate the campaign compiled it. Stated
+#                                    as a gap rather than presented as equivalent to the other five.
+269643d518b7ba2033c7a1f66fdfc560d72725a2822194d90c8235408c443a49  memcached-1.6.29.tar.gz  https://memcached.org/files/memcached-1.6.29.tar.gz
+98066f5363504b26c34dd20fbcc3c957990d764cdf42576c836fc021073f4341  redis-7.0.15.tar.gz  https://download.redis.io/releases/redis-7.0.15.tar.gz
+091eeec3ae2ccb91aac21d0e9a4a58944fb2cb112fa67bffc3e08c2eca2d85c8  sqlite-src-3500200.zip  https://sqlite.org/2025/sqlite-src-3500200.zip
+43e77716cc5acd71775c92751859fb744332d152eb45f1db49be1b50533542a9  FFmpeg-n4.3.9.tar.gz  https://github.com/FFmpeg/FFmpeg/archive/refs/tags/n4.3.9.tar.gz
+3a72e6af758236374764b7a1d682f7ab94c70ed0d00bf0cb0f7dd728352b6d96  mysql-8.0.39.tar.gz  https://github.com/mysql/mysql-server/archive/refs/tags/mysql-8.0.39.tar.gz
+6e52a4049ecf98928941661ccf98e01d1c97d161447ff5071c512a5afe32970e  memtier_benchmark-2.1.1.tar.gz  https://github.com/RedisLabs/memtier_benchmark/archive/refs/tags/2.1.1.tar.gz

@@ -1,9 +1,9 @@
 #!/bin/bash
 # Archive stale result trees, paper-era builds and traces from the SSD into /extra (tar+zstd), verify, delete.
-# Usage: ./cleanup_archive.sh [--dry-run]   (list in ARCHIVE_PATHS below; approved by Alexey 2026-09-04)
+# Usage: ./cleanup_archive.sh [--dry-run]   (list in ARCHIVE_PATHS below; approved 2026-09-04)
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-REPO=$PWD; DEST=/extra/alexey/tsan-experiments/archive-2026-09; DRY=${1:-}
+REPO=$PWD; DEST=/extra/$USER/tsan-experiments/archive-2026-09; DRY=${1:-}
 ARCHIVE_PATHS=(
   nosql/memcached/results.25.11 nosql/memcached/results.Nov27 nosql/memcached/results.good.March6
   nosql/memcached/old nosql/memcached/old-6march nosql/memcached/old-builds
@@ -39,5 +39,5 @@ for p in "${ARCHIVE_PATHS[@]}" projects/ffmpeg/results_threads-*; do
 done
 # spot check: extract one tarball's listing head
 first=$(ls "$DEST"/*.tar.zst | head -1); echo "spot check $first: $(tar -I zstd -tf "$first" | head -3 | tr '\n' ' ')"
-[ -n "$DRY" ] || rm -rf /extra/alexey/tsan-experiments/eviction-traces
+[ -n "$DRY" ] || rm -rf /extra/$USER/tsan-experiments/eviction-traces
 echo "df after: $(df -h / | tail -1)"; echo "CLEANUP DONE"

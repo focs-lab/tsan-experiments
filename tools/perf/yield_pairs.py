@@ -3,7 +3,7 @@
 
 Each row is <config> against <config>-yoff: one compiler, one source tree, one build recipe, differing only in
 the six -mllvm switches. Anything the stage-b2 base does to the number it does to both halves, so the ratio is
-attributable to the yield changes alone (tools/notes/yield-stage-design-2026-09-08.md). Reported the same way
+attributable to the yield changes alone. Reported the same way
 as the main tables: geometric mean over tests on per-test medians, 95 % bootstrap interval over run resamples,
 plus the restricted mean over the subtests whose baseline CV is at most 5 %.
 """
